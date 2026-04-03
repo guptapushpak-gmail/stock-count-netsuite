@@ -71,12 +71,14 @@ class AdjustmentAccountModel {
 class CountSession {
   final String id;
   final String locationId;
-  final String status; // started/completed
+  final String locationName;
+  final String status; // in_progress/completed
   final DateTime createdAt;
 
   const CountSession({
     required this.id,
     required this.locationId,
+    required this.locationName,
     required this.status,
     required this.createdAt,
   });

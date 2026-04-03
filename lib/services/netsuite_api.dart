@@ -1,30 +1,35 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 
 import '../models/models.dart';
 
 class NetSuiteAuthConfig {
-  final String accountId;
   final String clientId;
   final String clientSecret;
   final String redirectUri;
-  final String? roleId;
-  final String? loginHint;
+  // Empty = account-agnostic flow (user selects account on NetSuite login page).
+  final String accountId;
 
   const NetSuiteAuthConfig({
-    required this.accountId,
     required this.clientId,
     required this.clientSecret,
     required this.redirectUri,
-    this.roleId,
-    this.loginHint,
+    this.accountId = '',
   });
 
-  String get baseUrl => 'https://$accountId.suitetalk.api.netsuite.com';
+  bool get _hasAccount => accountId.isNotEmpty;
+
+  String baseUrlForAccount(String account) =>
+      'https://$account.suitetalk.api.netsuite.com';
 
   String buildAuthorizeUrl({String? state}) {
+    final host = _hasAccount
+        ? '$accountId.app.netsuite.com'
+        : 'system.netsuite.com';
     final params = <String, String>{
       'response_type': 'code',
       'client_id': clientId,
@@ -32,20 +37,15 @@ class NetSuiteAuthConfig {
       'scope': 'rest_webservices',
       'prompt': 'login',
     };
-    if (state != null && state.isNotEmpty) {
-      params['state'] = state;
-    }
-    if (roleId != null && roleId!.isNotEmpty) {
-      params['role'] = roleId!;
-    }
-    if (loginHint != null && loginHint!.isNotEmpty) {
-      params['login_hint'] = loginHint!;
-    }
-    final uri = Uri.https('$accountId.app.netsuite.com', '/app/login/oauth2/authorize.nl', params);
-    return uri.toString();
+    if (state != null && state.isNotEmpty) params['state'] = state;
+    return Uri.https(host, '/app/login/oauth2/authorize.nl', params).toString();
   }
 
-  String buildTokenEndpoint() => '$baseUrl/services/rest/auth/oauth2/v1/token';
+  String buildTokenEndpoint({String? account}) {
+    final a = account ?? accountId;
+    if (a.isNotEmpty) return 'https://$a.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token';
+    return 'https://system.netsuite.com/services/rest/auth/oauth2/v1/token';
+  }
 
   String basicAuthHeader() {
     final raw = '$clientId:$clientSecret';
@@ -70,19 +70,21 @@ class NetSuiteApi {
     return double.tryParse(value.toString()) ?? 0;
   }
 
-  Future<String> exchangeCodeForToken({
+  /// Returns `(token, accountId)`.
+  /// Pass [accountId] if already known from the OAuth callback URL.
+  Future<({String token, String accountId})> exchangeCodeForToken({
     required NetSuiteAuthConfig cfg,
     required String code,
+    String? accountId,
   }) async {
     final dio = Dio(BaseOptions(
-      baseUrl: cfg.baseUrl,
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 30),
     ));
 
     try {
       final response = await dio.post(
-        '/services/rest/auth/oauth2/v1/token',
+        cfg.buildTokenEndpoint(account: accountId),
         data: {
           'grant_type': 'authorization_code',
           'code': code,
@@ -97,11 +99,20 @@ class NetSuiteApi {
         ),
       );
 
-      final token = response.data['access_token']?.toString();
-      if (token == null || token.isEmpty) {
+      final token = response.data['access_token']?.toString() ?? '';
+      if (token.isEmpty) {
         throw Exception('NetSuite token not returned. Check account/client details.');
       }
-      return token;
+
+      // NetSuite may return account_id in the token response body.
+      final responseAccountId =
+          (response.data['account_id'] ?? response.data['company_id'] ?? '').toString().trim();
+
+      final resolvedAccount = responseAccountId.isNotEmpty
+          ? responseAccountId
+          : (accountId ?? cfg.accountId);
+
+      return (token: token, accountId: resolvedAccount);
     } on DioException catch (e) {
       throw Exception(
         'Token exchange failed: type=${e.type}, '
@@ -355,5 +366,128 @@ class NetSuiteApi {
 
   Future<void> syncPendingChanges({required String accountId, required String token}) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
+  }
+
+  /// Fetches the company logo from NetSuite.
+  /// Tries SuiteQL first, then falls back to the companyInformation REST record.
+  /// Returns raw image bytes, or null if no logo is set / accessible.
+  Future<Uint8List?> fetchCompanyLogo({required String accountId, required String token}) async {
+    final dio = Dio(BaseOptions(
+      baseUrl: 'https://$accountId.suitetalk.api.netsuite.com',
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+    ));
+    final headers = {'Authorization': 'Bearer $token'};
+
+    String? logoFileId;
+
+    // Strategy 1: subsidiary REST record list → first record → logo field.
+    try {
+      final listResp = await dio.get(
+        '/services/rest/record/v1/subsidiary',
+        queryParameters: {'limit': 1},
+        options: Options(headers: headers),
+      );
+      final items = (listResp.data['items'] as List?) ?? [];
+      if (items.isNotEmpty) {
+        final link = _asString((items.first as Map<String, dynamic>)['links']
+            ?.firstWhere((l) => l['rel'] == 'self', orElse: () => null)?['href'] ?? '');
+        final subId = link.isNotEmpty ? link.split('/').last : _asString((items.first as Map<String, dynamic>)['id']);
+        debugPrint('[LOGO] subsidiary id=$subId');
+        if (subId.isNotEmpty) {
+          final subResp = await dio.get(
+            '/services/rest/record/v1/subsidiary/$subId',
+            options: Options(headers: headers),
+          );
+          final d = subResp.data as Map<String, dynamic>? ?? {};
+          // logo field may be a nested object {id, refName} or a plain id string.
+          final logoVal = d['logo'] ?? d['logoimage'];
+          if (logoVal is Map) {
+            logoFileId = _asString(logoVal['id']);
+          } else if (logoVal != null) {
+            logoFileId = _asString(logoVal);
+          }
+          debugPrint('[LOGO] subsidiary/$subId logo field=$logoVal → fileId=$logoFileId');
+        }
+      }
+    } catch (e) {
+      final de = e is DioException ? '${e.response?.statusCode} ${e.response?.data}' : e.toString();
+      debugPrint('[LOGO] subsidiary REST strategy failed: $de');
+    }
+
+    // Strategy 2: companyInformation REST record.
+    if (logoFileId == null || logoFileId.isEmpty) {
+      for (final recType in ['companyInformation', 'companyinformation', 'companyPreferences']) {
+        if (logoFileId != null && logoFileId!.isNotEmpty) break;
+        try {
+          final resp = await dio.get(
+            '/services/rest/record/v1/$recType',
+            options: Options(headers: headers),
+          );
+          final d = resp.data as Map<String, dynamic>? ?? {};
+          final logoVal = d['logo'] ?? d['logoimage'] ?? d['logoUrl'];
+          if (logoVal is Map) {
+            logoFileId = _asString(logoVal['id']);
+          } else if (logoVal != null) {
+            logoFileId = _asString(logoVal);
+          }
+          debugPrint('[LOGO] $recType → fileId=$logoFileId');
+        } catch (e) {
+          final de = e is DioException ? '${e.response?.statusCode} ${e.response?.data}' : e.toString();
+          debugPrint('[LOGO] $recType failed: $de');
+        }
+      }
+    }
+
+    if (logoFileId == null || logoFileId.isEmpty) return null;
+
+    // Try to download the file. NetSuite may serve binary directly at /file/{id}
+    // or expose a `url` in the metadata, or use a /content sub-resource.
+    // Try multiple strategies in order.
+    for (final path in [
+      '/services/rest/record/v1/file/$logoFileId/content',
+      '/services/rest/record/v1/file/$logoFileId',
+    ]) {
+      try {
+        final resp = await dio.get(
+          path,
+          options: Options(
+            headers: {...headers, 'Accept': '*/*'},
+            responseType: ResponseType.bytes,
+            followRedirects: true,
+          ),
+        );
+        debugPrint('[LOGO] $path → contentType=${resp.headers.value('content-type')}, len=${resp.data?.length}');
+        final data = resp.data;
+        if (data is List<int> && data.isNotEmpty) return Uint8List.fromList(data);
+        if (data is Uint8List && data.isNotEmpty) return data;
+      } catch (e) {
+        final de = e is DioException ? '${e.response?.statusCode} ${e.response?.data?.toString().substring(0, (e.response?.data?.toString().length ?? 0).clamp(0, 200))}' : e.toString();
+        debugPrint('[LOGO] $path failed: $de');
+      }
+    }
+
+    // If binary fetch failed, try to get metadata and follow the URL.
+    try {
+      final meta = await dio.get(
+        '/services/rest/record/v1/file/$logoFileId',
+        options: Options(headers: headers),
+      );
+      final d = meta.data as Map<String, dynamic>? ?? {};
+      debugPrint('[LOGO] file/$logoFileId metadata keys=${d.keys.toList()}');
+      final url = _asString(d['url'] ?? d['fileUrl'] ?? d['downloadUrl']);
+      if (url.isNotEmpty) {
+        final bytes = await dio.get<List<int>>(
+          url,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        if (bytes.data != null && bytes.data!.isNotEmpty) {
+          return Uint8List.fromList(bytes.data!);
+        }
+      }
+    } catch (e) {
+      debugPrint('[LOGO] metadata fallback failed: $e');
+    }
+    return null;
   }
 }
