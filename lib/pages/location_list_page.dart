@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/app_state.dart';
 import '../models/models.dart';
+import 'sync_page.dart';
 
 class LocationListPage extends StatelessWidget {
   const LocationListPage({super.key});
@@ -81,7 +82,12 @@ class LocationListPage extends StatelessWidget {
                   final loc = app.locations[i];
                   return _LocationCard(
                     location: loc,
-                    onTap: () => context.read<AppState>().downloadDataForLocation(loc),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => SyncPage(location: loc),
+                      ),
+                    ),
                   );
                 },
               ),
@@ -107,7 +113,7 @@ class _LocationCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: InkWell(
         onTap: app.loading ? null : onTap,

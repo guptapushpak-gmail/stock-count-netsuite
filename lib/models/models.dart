@@ -84,15 +84,33 @@ class CountSession {
   });
 }
 
+class LotSerialAssignment {
+  final String number;
+  final int qty;
+  const LotSerialAssignment({required this.number, required this.qty});
+
+  Map<String, dynamic> toJson() => {'number': number, 'qty': qty};
+
+  factory LotSerialAssignment.fromJson(Map<String, dynamic> json) =>
+      LotSerialAssignment(
+        number: json['number'] as String,
+        qty: json['qty'] as int,
+      );
+}
+
 class InventoryItemModel {
   final String id;
   final String name;
   final String upc;
+  final bool isLotItem;
+  final bool isSerialItem;
 
   const InventoryItemModel({
     required this.id,
     required this.name,
     required this.upc,
+    this.isLotItem = false,
+    this.isSerialItem = false,
   });
 
   static String _readString(dynamic v) {
@@ -148,18 +166,72 @@ class ScannedItem {
   final String upc;
   final String name;
   final int qty;
+  final bool isLotItem;
+  final bool isSerialItem;
+  final List<LotSerialAssignment> lotSerialAssignments;
 
   const ScannedItem({
     required this.itemId,
     required this.upc,
     required this.name,
     required this.qty,
+    this.isLotItem = false,
+    this.isSerialItem = false,
+    this.lotSerialAssignments = const [],
   });
 
-  ScannedItem copyWith({int? qty}) => ScannedItem(
+  bool get needsLotSerialDetail =>
+      (isLotItem || isSerialItem) && lotSerialAssignments.isEmpty;
+
+  ScannedItem copyWith({
+    int? qty,
+    List<LotSerialAssignment>? lotSerialAssignments,
+  }) =>
+      ScannedItem(
         itemId: itemId,
         upc: upc,
         name: name,
         qty: qty ?? this.qty,
+        isLotItem: isLotItem,
+        isSerialItem: isSerialItem,
+        lotSerialAssignments: lotSerialAssignments ?? this.lotSerialAssignments,
       );
+
+  static String? encodeLotSerial(List<LotSerialAssignment> assignments) {
+    if (assignments.isEmpty) return null;
+    return '[${assignments.map((a) => '{"number":"${a.number}","qty":${a.qty}}').join(',')}]';
+  }
+
+  static List<LotSerialAssignment> decodeLotSerial(String? data) {
+    if (data == null || data.isEmpty) return const [];
+    try {
+      // Simple JSON parse without dart:convert dependency
+      final cleaned = data.trim();
+      if (!cleaned.startsWith('[')) return const [];
+      final inner = cleaned.substring(1, cleaned.length - 1).trim();
+      if (inner.isEmpty) return const [];
+      final result = <LotSerialAssignment>[];
+      // Split by },{
+      final entries = inner.split('},{');
+      for (final entry in entries) {
+        final clean = entry.replaceAll('{', '').replaceAll('}', '');
+        String? number;
+        int? qty;
+        for (final part in clean.split(',')) {
+          final kv = part.split(':');
+          if (kv.length < 2) continue;
+          final key = kv[0].replaceAll('"', '').trim();
+          final val = kv.sublist(1).join(':').replaceAll('"', '').trim();
+          if (key == 'number') number = val;
+          if (key == 'qty') qty = int.tryParse(val);
+        }
+        if (number != null && qty != null) {
+          result.add(LotSerialAssignment(number: number, qty: qty));
+        }
+      }
+      return result;
+    } catch (_) {
+      return const [];
+    }
+  }
 }

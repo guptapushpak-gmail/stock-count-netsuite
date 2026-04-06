@@ -36,6 +36,11 @@ class AppState extends ChangeNotifier {
   List<ScannedItem> scannedItems = [];
   String? activeSessionId;
 
+  // Current user info (populated after login)
+  String? currentUserName;
+  String? currentRoleName;
+  String? currentUserEmail;
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   String? _extractAccountFromJwt(String jwt) {
@@ -112,7 +117,13 @@ class AppState extends ChangeNotifier {
         if (selectedLocation != null) {
           final dbItems = await db.getItemsForLocation(selLocId);
           catalogItems = dbItems
-              .map((r) => InventoryItemModel(id: r.id, name: r.name, upc: r.upc))
+              .map((r) => InventoryItemModel(
+                    id: r.id,
+                    name: r.name,
+                    upc: r.upc,
+                    isLotItem: r.isLotItem,
+                    isSerialItem: r.isSerialItem,
+                  ))
               .toList();
           debugPrint('[BOOT] Catalog items loaded from DB: ${catalogItems.length}');
         }
@@ -136,7 +147,15 @@ class AppState extends ChangeNotifier {
           activeSessionId = s.id;
           final dbScanned = await db.getScannedItems(s.id);
           scannedItems = dbScanned
-              .map((r) => ScannedItem(itemId: r.itemId, upc: r.upc, name: r.name, qty: r.qty))
+              .map((r) => ScannedItem(
+                    itemId: r.itemId,
+                    upc: r.upc,
+                    name: r.name,
+                    qty: r.qty,
+                    isLotItem: r.isLotItem,
+                    isSerialItem: r.isSerialItem,
+                    lotSerialAssignments: ScannedItem.decodeLotSerial(r.lotSerialData),
+                  ))
               .toList();
           break;
         }
@@ -183,6 +202,54 @@ class AppState extends ChangeNotifier {
       }
       notifyListeners();
     }).catchError((_) {});
+
+    // Silently refresh catalog items for the selected location so that
+    // isLotItem / isSerialItem flags are always up to date (handles DB rows
+    // that were cached before schema v2 added those columns).
+    if (selectedLocation != null) {
+      api.downloadStocktakeData(
+        accountId: accountId!,
+        token: token!,
+        locationId: selectedLocation!.id,
+      ).then((fresh) async {
+        catalogItems = fresh;
+        // Also propagate fresh lot/serial flags to any already-scanned items
+        // so the scan page UI reflects the correct state immediately.
+        final freshById = {for (final f in fresh) f.id: f};
+        for (var i = 0; i < scannedItems.length; i++) {
+          final s = scannedItems[i];
+          if (s.itemId.startsWith('unknown:')) continue;
+          final cat = freshById[s.itemId];
+          if (cat == null) continue;
+          if ((cat.isLotItem || cat.isSerialItem) != (s.isLotItem || s.isSerialItem)) {
+            scannedItems[i] = ScannedItem(
+              itemId: s.itemId,
+              upc: s.upc,
+              name: s.name,
+              qty: s.qty,
+              isLotItem: cat.isLotItem,
+              isSerialItem: cat.isSerialItem,
+              lotSerialAssignments: s.lotSerialAssignments,
+            );
+          }
+        }
+        await db.replaceItemsForLocation(
+          selectedLocation!.id,
+          fresh.map((i) => CatalogItemsCompanion.insert(
+                id: i.id,
+                locationId: selectedLocation!.id,
+                name: i.name,
+                upc: i.upc,
+                isLotItem: Value(i.isLotItem),
+                isSerialItem: Value(i.isSerialItem),
+              )).toList(),
+        );
+        notifyListeners();
+        debugPrint('[REFRESH] Catalog refreshed: ${fresh.length} items');
+      }).catchError((e) {
+        debugPrint('[REFRESH] Catalog refresh failed (non-fatal): $e');
+      });
+    }
 
     api.fetchAdjustmentAccounts(accountId: accountId!, token: token!).then((fresh) async {
       adjustmentAccounts
@@ -256,7 +323,9 @@ class AppState extends ChangeNotifier {
               uri.queryParameters['account_domain']?.split('.').first.toUpperCase() ??
               uri.queryParameters['accountdomain']?.split('.').first.toUpperCase())
           ?.toUpperCase();
-      debugPrint('[AUTH] callbackAccountId: $callbackAccountId');
+      final callbackEntityId = uri.queryParameters['entity'];
+      final callbackRoleId = uri.queryParameters['role'];
+      debugPrint('[AUTH] callbackAccountId: $callbackAccountId, entity: $callbackEntityId, role: $callbackRoleId');
 
       final exchanged = await api.exchangeCodeForToken(
         cfg: cfg,
@@ -305,6 +374,25 @@ class AppState extends ChangeNotifier {
       }
 
       authenticated = true;
+
+      // Fetch user & role display names in background (non-fatal).
+      if (callbackEntityId != null || callbackRoleId != null) {
+        api.fetchUserInfo(
+          accountId: accountId!,
+          token: token!,
+          entityId: callbackEntityId,
+          roleId: callbackRoleId,
+        ).then((info) {
+          currentUserName = info.name;
+          currentRoleName = info.roleName;
+          currentUserEmail = info.email;
+          notifyListeners();
+        }).catchError((e) { debugPrint('[AUTH] user info fetch failed: $e'); });
+      }
+
+      // Refresh catalog flags in background after fresh login so that any
+      // stale isLotItem/isSerialItem values in scanned items are corrected.
+      _refreshCachedData();
     } catch (e, st) {
       debugPrint('[AUTH] ERROR: $e\n$st');
       authenticated = false;
@@ -315,39 +403,127 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  // ── Auth helpers ─────────────────────────────────────────────────────────
+
+  /// Returns true if [e] looks like a 401/403 (expired or invalid token).
+  static bool isAuthError(Object e) {
+    final msg = e.toString().toLowerCase();
+    return msg.contains('401') || msg.contains('403') ||
+        msg.contains('unauthorized') || msg.contains('invalid_token') ||
+        msg.contains('expired') || msg.contains('token');
+  }
+
+  /// Clears auth state so the router redirects to the login page.
+  Future<void> expireSession() async {
+    await db.clearAuth();
+    token = null;
+    accountId = null;
+    authenticated = false;
+    companyLogo = null;
+    locations = [];
+    adjustmentAccounts.clear();
+    selectedLocation = null;
+    catalogItems.clear();
+    scannedItems.clear();
+    sessions.clear();
+    activeSessionId = null;
+    currentUserName = null;
+    currentRoleName = null;
+    currentUserEmail = null;
+    error = 'Session expired. Please sign in again.';
+    notifyListeners();
+  }
+
   // ── Location ──────────────────────────────────────────────────────────────
 
-  Future<void> downloadDataForLocation(LocationModel location) async {
+  /// Sync all data required for stocktaking at [location].
+  ///
+  /// The [onStep] callback fires whenever a step transitions:
+  ///   stepIndex  0 = Inventory Items, 1 = Adjustment Accounts, 2 = Saving to device
+  ///   active     true while the step is in progress, false when it finishes
+  ///   detail     human-readable status string
+  Future<void> syncDataForLocation(
+    LocationModel location, {
+    void Function(int stepIndex, bool active, String detail)? onStep,
+  }) async {
     selectedLocation = location;
     db.setSelectedLocation(location.id);
-    loading = true;
     error = null;
-    notifyListeners();
+
     try {
-      final items = await api.downloadStocktakeData(
-        accountId: accountId ?? '',
-        token: token!,
-        locationId: location.id,
-      );
+      // ── Step 0: Inventory Items ──────────────────────────────────────────
+      onStep?.call(0, true, 'Connecting…');
+      late final List<InventoryItemModel> items;
+      try {
+        items = await api.downloadStocktakeData(
+          accountId: accountId ?? '',
+          token: token!,
+          locationId: location.id,
+          onProgress: (n) => onStep?.call(0, true, '$n items fetched'),
+        );
+      } catch (e) {
+        if (isAuthError(e)) {
+          await expireSession();
+          throw Exception('Session expired. Please sign in again.');
+        }
+        rethrow;
+      }
+      onStep?.call(0, false, '${items.length} items downloaded');
+
+      // ── Step 1: Adjustment Accounts ──────────────────────────────────────
+      onStep?.call(1, true, 'Fetching accounts…');
+      List<AdjustmentAccountModel> accts = [];
+      try {
+        accts = await api.fetchAdjustmentAccounts(
+          accountId: accountId!,
+          token: token!,
+        );
+        adjustmentAccounts
+          ..clear()
+          ..addAll(accts);
+        debugPrint('[SYNC] Accounts fetched: ${accts.length}');
+      } catch (e) {
+        // Fall back to cached accounts — do not block the sync.
+        accts = List.of(adjustmentAccounts);
+        debugPrint('[SYNC] Accounts fetch failed (using cache): $e');
+      }
+      onStep?.call(1, false, '${accts.length} accounts synced');
+
+      // ── Step 2: Save to local database ───────────────────────────────────
+      onStep?.call(2, true, 'Writing to local database…');
       catalogItems = items;
-      await db.replaceItemsForLocation(
-        location.id,
-        items
-            .map((i) => CatalogItemsCompanion.insert(
-                  id: i.id,
-                  locationId: location.id,
-                  name: i.name,
-                  upc: i.upc,
-                ))
-            .toList(),
-      );
+      await Future.wait([
+        db.replaceItemsForLocation(
+          location.id,
+          items
+              .map((i) => CatalogItemsCompanion.insert(
+                    id: i.id,
+                    locationId: location.id,
+                    name: i.name,
+                    upc: i.upc,
+                    isLotItem: Value(i.isLotItem),
+                    isSerialItem: Value(i.isSerialItem),
+                  ))
+              .toList(),
+        ),
+        db.replaceAccounts(
+          accts
+              .map((a) => AdjustmentAccountsCompanion.insert(id: a.id, name: a.name))
+              .toList(),
+        ),
+      ]);
+      onStep?.call(2, false, 'All data saved locally');
     } catch (e) {
       error = e.toString();
+      rethrow;
     } finally {
-      loading = false;
       notifyListeners();
     }
   }
+
+  // Keep the old method as a thin wrapper for any callers that don't need progress.
+  Future<void> downloadDataForLocation(LocationModel location) =>
+      syncDataForLocation(location);
 
   void clearSelectedLocation() {
     selectedLocation = null;
@@ -373,6 +549,9 @@ class AppState extends ChangeNotifier {
     scannedItems.clear();
     sessions.clear();
     activeSessionId = null;
+    currentUserName = null;
+    currentRoleName = null;
+    currentUserEmail = null;
     notifyListeners();
   }
 
@@ -394,39 +573,140 @@ class AppState extends ChangeNotifier {
 
   // ── Scanning ──────────────────────────────────────────────────────────────
 
+  /// Add a scanned barcode — looks up by UPC in the catalog.
   void addScanned(String code) {
     final normalized = code.trim();
     if (normalized.isEmpty) return;
 
     InventoryItemModel? matched;
     for (final item in catalogItems) {
-      if (item.upc == normalized) {
+      if (item.upc.isNotEmpty && item.upc == normalized) {
         matched = item;
         break;
       }
     }
 
     final itemId = matched?.id ?? 'unknown:$normalized';
-    final name = matched?.name ?? 'Unknown UPC $normalized';
+    final name = matched?.name ?? 'Unknown barcode: $normalized';
     final upc = matched?.upc ?? normalized;
+    final isLot = matched?.isLotItem ?? false;
+    final isSerial = matched?.isSerialItem ?? false;
 
     int newQty;
     final index = scannedItems.indexWhere((e) => e.itemId == itemId);
     if (index >= 0) {
+      // For lot/serial items scanned by barcode, just increment the qty counter
+      // so the user can see it was scanned. They must add lot detail before submit.
       newQty = scannedItems[index].qty + 1;
       scannedItems[index] = scannedItems[index].copyWith(qty: newQty);
     } else {
       newQty = 1;
-      scannedItems.add(ScannedItem(itemId: itemId, upc: upc, name: name, qty: newQty));
+      scannedItems.add(ScannedItem(
+        itemId: itemId,
+        upc: upc,
+        name: name,
+        qty: newQty,
+        isLotItem: isLot,
+        isSerialItem: isSerial,
+      ));
     }
 
     if (activeSessionId != null) {
+      final si = scannedItems[scannedItems.indexWhere((e) => e.itemId == itemId)];
       db.upsertScannedItem(
         sessionId: activeSessionId!,
         itemId: itemId,
         upc: upc,
         name: name,
         qty: newQty,
+        isLotItem: isLot,
+        isSerialItem: isSerial,
+        lotSerialData: ScannedItem.encodeLotSerial(si.lotSerialAssignments),
+      );
+    }
+    notifyListeners();
+  }
+
+  /// Returns the catalog item matching [upc], or null if not found.
+  InventoryItemModel? findItemByBarcode(String upc) {
+    final normalized = upc.trim();
+    for (final item in catalogItems) {
+      if (item.upc.isNotEmpty && item.upc == normalized) return item;
+    }
+    return null;
+  }
+
+  /// Add a catalog item directly by ID (used from search results).
+  /// For lot/serial items, pass [lotSerialAssignments] to record detail.
+  void addCatalogItem(InventoryItemModel item,
+      {List<LotSerialAssignment>? lotSerialAssignments}) {
+    final assignments = lotSerialAssignments ?? const [];
+    final index = scannedItems.indexWhere((e) => e.itemId == item.id);
+    final int newQty;
+
+    if (index >= 0) {
+      if (item.isLotItem || item.isSerialItem) {
+        // Merge new assignments into existing ones
+        final merged = [
+          ...scannedItems[index].lotSerialAssignments,
+          ...assignments,
+        ];
+        newQty = merged.fold(0, (s, a) => s + a.qty);
+        scannedItems[index] =
+            scannedItems[index].copyWith(qty: newQty, lotSerialAssignments: merged);
+      } else {
+        newQty = scannedItems[index].qty + 1;
+        scannedItems[index] = scannedItems[index].copyWith(qty: newQty);
+      }
+    } else {
+      newQty = assignments.isNotEmpty
+          ? assignments.fold(0, (s, a) => s + a.qty)
+          : 1;
+      scannedItems.add(ScannedItem(
+        itemId: item.id,
+        upc: item.upc,
+        name: item.name,
+        qty: newQty,
+        isLotItem: item.isLotItem,
+        isSerialItem: item.isSerialItem,
+        lotSerialAssignments: assignments,
+      ));
+    }
+
+    if (activeSessionId != null) {
+      final si = scannedItems[scannedItems.indexWhere((e) => e.itemId == item.id)];
+      db.upsertScannedItem(
+        sessionId: activeSessionId!,
+        itemId: item.id,
+        upc: item.upc,
+        name: item.name,
+        qty: newQty,
+        isLotItem: item.isLotItem,
+        isSerialItem: item.isSerialItem,
+        lotSerialData: ScannedItem.encodeLotSerial(si.lotSerialAssignments),
+      );
+    }
+    notifyListeners();
+  }
+
+  /// Update the lot/serial assignments for an already-scanned item.
+  void updateLotSerial(String itemId, List<LotSerialAssignment> assignments) {
+    final index = scannedItems.indexWhere((e) => e.itemId == itemId);
+    if (index < 0) return;
+    final newQty = assignments.fold(0, (s, a) => s + a.qty);
+    scannedItems[index] =
+        scannedItems[index].copyWith(qty: newQty, lotSerialAssignments: assignments);
+    if (activeSessionId != null) {
+      final si = scannedItems[index];
+      db.upsertScannedItem(
+        sessionId: activeSessionId!,
+        itemId: si.itemId,
+        upc: si.upc,
+        name: si.name,
+        qty: newQty,
+        isLotItem: si.isLotItem,
+        isSerialItem: si.isSerialItem,
+        lotSerialData: ScannedItem.encodeLotSerial(assignments),
       );
     }
     notifyListeners();
@@ -492,43 +772,194 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Fetch fresh lot/serial flags from NetSuite for the items being submitted.
+      // This guards against stale DB records (e.g. cached before schema v2).
+      final knownIds = scannedItems
+          .where((s) => !s.itemId.startsWith('unknown:'))
+          .map((s) => s.itemId)
+          .toSet()
+          .toList();
+      if (knownIds.isNotEmpty) {
+        try {
+          final ids = knownIds.join(',');
+          debugPrint('[SUBMIT] Fetching lot/serial flags for ids: $ids');
+          final freshItems = await api.fetchLotSerialFlags(
+            accountId: accountId!,
+            token: token!,
+            itemIds: ids,
+          );
+          debugPrint('[SUBMIT] lot/serial flags result: $freshItems');
+          final flagsById = {for (final f in freshItems) f.$1: (isLot: f.$2, isSerial: f.$3)};
+          for (var i = 0; i < scannedItems.length; i++) {
+            final s = scannedItems[i];
+            if (s.itemId.startsWith('unknown:')) continue;
+            final flags = flagsById[s.itemId];
+            debugPrint('[SUBMIT] item ${s.itemId} flags=$flags, current isLot=${s.isLotItem} isSerial=${s.isSerialItem}');
+            if (flags == null) continue;
+            if ((flags.isLot || flags.isSerial) && !(s.isLotItem || s.isSerialItem)) {
+              scannedItems[i] = ScannedItem(
+                itemId: s.itemId,
+                upc: s.upc,
+                name: s.name,
+                qty: s.qty,
+                isLotItem: flags.isLot,
+                isSerialItem: flags.isSerial,
+                lotSerialAssignments: s.lotSerialAssignments,
+              );
+              // Also update catalog in memory
+              for (var j = 0; j < catalogItems.length; j++) {
+                if (catalogItems[j].id == s.itemId) {
+                  catalogItems[j] = InventoryItemModel(
+                    id: catalogItems[j].id,
+                    name: catalogItems[j].name,
+                    upc: catalogItems[j].upc,
+                    isLotItem: flags.isLot,
+                    isSerialItem: flags.isSerial,
+                  );
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('[SUBMIT] lot/serial flag refresh failed (non-fatal): $e');
+        }
+      }
+
+      // Validate lot/serial items have assignments
+      final lotSerialMissing = scannedItems
+          .where((s) =>
+              !s.itemId.startsWith('unknown:') && s.needsLotSerialDetail)
+          .map((s) => s.name)
+          .toList();
+      if (lotSerialMissing.isNotEmpty) {
+        throw Exception(
+          'The following lot/serial items need lot or serial numbers before submitting:\n\n'
+          '• ${lotSerialMissing.join('\n• ')}\n\n'
+          'Tap each item in the list to enter lot/serial detail.',
+        );
+      }
+
       final countedByItem = <String, int>{};
       for (final s in scannedItems) {
         if (s.itemId.startsWith('unknown:')) continue;
         countedByItem[s.itemId] = (countedByItem[s.itemId] ?? 0) + s.qty;
       }
+      final unmatchedCount = scannedItems.where((s) => s.itemId.startsWith('unknown:')).length;
+      debugPrint('[SUBMIT] Items to submit: ${countedByItem.length}, unmatched: $unmatchedCount, scanned total: ${scannedItems.length}');
       if (countedByItem.isEmpty) {
-        throw Exception('No matched scanned items to submit.');
+        throw Exception(
+          unmatchedCount > 0
+              ? 'None of the $unmatchedCount scanned item(s) could be matched to NetSuite inventory.\n\n'
+                'Tip: Use the Search field to find items by name — this works even when barcodes are not set up.'
+              : 'No items to submit.',
+        );
+      }
+      if (unmatchedCount > 0) {
+        debugPrint('[SUBMIT] Warning: $unmatchedCount unmatched items will be skipped.');
       }
 
-      final onHand = await api.fetchOnHandByItem(
-        accountId: accountId!,
-        token: token!,
-        locationId: selectedLocation!.id,
-        itemIds: countedByItem.keys.toList(growable: false),
-      );
+      debugPrint('[SUBMIT] Fetching on-hand for ${countedByItem.keys.take(5)}…');
+      late final Map<String, double> onHand;
+      try {
+        onHand = await api.fetchOnHandByItem(
+          accountId: accountId!,
+          token: token!,
+          locationId: selectedLocation!.id,
+          itemIds: countedByItem.keys.toList(growable: false),
+        );
+      } catch (e) {
+        debugPrint('[SUBMIT] on-hand fetch error: $e');
+        if (isAuthError(e)) {
+          await expireSession();
+          throw Exception('Session expired. Please sign in again.');
+        }
+        rethrow;
+      }
 
       final lines = <Map<String, dynamic>>[];
+      final skippedNoBalance = <String>[];
+
       countedByItem.forEach((id, countedQty) {
-        final adjust = countedQty - (onHand[id] ?? 0);
-        if (adjust != 0) lines.add({'itemId': id, 'adjustQtyBy': adjust});
+        final currentQty = onHand[id]; // null = no InventoryBalance record
+        if (currentQty == null) {
+          // No balance record means item has 0 on-hand with prior history.
+          // NetSuite rejects adjusting these ("Revaluation is no longer first transaction").
+          // Skip and warn.
+          final name = scannedItems.firstWhere((s) => s.itemId == id,
+              orElse: () => ScannedItem(itemId: id, upc: '', name: id, qty: 0)).name;
+          skippedNoBalance.add(name);
+          debugPrint('[SUBMIT] Skipping $id ($name) — no on-hand balance record');
+        } else {
+          final adjust = countedQty - currentQty.toInt();
+          if (adjust != 0) {
+            final scannedEntry = scannedItems.firstWhere(
+              (s) => s.itemId == id,
+              orElse: () => ScannedItem(itemId: id, upc: '', name: id, qty: 0),
+            );
+            final line = <String, dynamic>{'itemId': id, 'adjustQtyBy': adjust};
+            if (scannedEntry.lotSerialAssignments.isNotEmpty) {
+              line['lotSerialAssignments'] = scannedEntry.lotSerialAssignments
+                  .map((a) => {'number': a.number, 'qty': a.qty})
+                  .toList();
+              line['isSerialItem'] = scannedEntry.isSerialItem;
+            }
+            lines.add(line);
+          }
+        }
       });
 
+      debugPrint('[SUBMIT] On-hand result: $onHand');
+      debugPrint('[SUBMIT] Adjustment lines: $lines, skipped: $skippedNoBalance');
+
+      if (lines.isEmpty && skippedNoBalance.isNotEmpty) {
+        throw Exception(
+          'Could not adjust the following items — they have no current stock at this location '
+          'and cannot be adjusted via inventory adjustment:\n\n'
+          '• ${skippedNoBalance.join('\n• ')}\n\n'
+          'These items may need to be received first via a Purchase Order.',
+        );
+      }
       if (lines.isEmpty) {
-        throw Exception('No quantity difference found. Nothing to adjust.');
+        throw Exception('Quantities match current on-hand. Nothing to adjust.');
       }
 
-      final adjustmentId = await api.createInventoryAdjustment(
-        accountId: accountId!,
-        token: token!,
-        locationId: selectedLocation!.id,
-        adjustmentAccountId: adjustmentAccountId,
-        subsidiaryId: (subsidiaryId == null || subsidiaryId.trim().isEmpty)
-            ? selectedLocation?.subsidiaryId
-            : subsidiaryId,
-        memo: memo,
-        lines: lines,
-      );
+      debugPrint('[SUBMIT] Creating adjustment: account=$adjustmentAccountId, subsidiary=$subsidiaryId, lines=${lines.length}');
+      late final String adjustmentId;
+      try {
+        adjustmentId = await api.createInventoryAdjustment(
+          accountId: accountId!,
+          token: token!,
+          locationId: selectedLocation!.id,
+          adjustmentAccountId: adjustmentAccountId,
+          subsidiaryId: (subsidiaryId == null || subsidiaryId.trim().isEmpty)
+              ? selectedLocation?.subsidiaryId
+              : subsidiaryId,
+          memo: memo,
+          lines: lines,
+        );
+      } catch (e) {
+        debugPrint('[SUBMIT] createInventoryAdjustment error: $e');
+        if (isAuthError(e)) {
+          await expireSession();
+          throw Exception('Session expired. Please sign in again.');
+        }
+        // NetSuite returns this when a lot/serial item is submitted without
+        // inventoryDetail. This can happen when the local catalog was cached
+        // before isLotItem/isSerialItem flags were stored (old DB schema).
+        final msg = e.toString();
+        if (msg.contains('configure the inventory detail') ||
+            msg.contains('inventory detail')) {
+          throw Exception(
+            'One or more items require lot or serial number detail before they can be adjusted.\n\n'
+            'Please:\n'
+            '1. Sync this location again (to refresh item types)\n'
+            '2. Re-add those items — a lot/serial dialog will appear\n'
+            '3. Enter the lot or serial numbers, then submit again.',
+          );
+        }
+        rethrow;
+      }
 
       // Mark session completed
       if (activeSessionId != null) {

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 
+import '../models/models.dart';
 import '../state/app_state.dart';
 
 class StockCountScanPage extends StatefulWidget {
@@ -15,6 +16,132 @@ class StockCountScanPage extends StatefulWidget {
 }
 
 class _StockCountScanPageState extends State<StockCountScanPage> {
+  Future<void> _showLotSerialDialog(
+      BuildContext context, InventoryItemModel item) async {
+    final app = context.read<AppState>();
+    final isSerial = item.isSerialItem;
+    // Pre-populate with any existing assignments
+    final existing = app.scannedItems
+        .where((s) => s.itemId == item.id)
+        .expand((s) => s.lotSerialAssignments)
+        .toList();
+
+    final assignments = List<LotSerialAssignment>.from(existing);
+    final numberCtrl = TextEditingController();
+    final qtyCtrl = TextEditingController(text: isSerial ? '1' : '');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text(isSerial ? 'Serial Numbers — ${item.name}' : 'Lot Numbers — ${item.name}'),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (assignments.isNotEmpty) ...[
+                    Text(isSerial ? 'Serial numbers:' : 'Lot assignments:',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    ...assignments.asMap().entries.map((e) => Row(
+                          children: [
+                            Expanded(
+                              child: Text('${e.value.number}  ×  ${e.value.qty}',
+                                  style: const TextStyle(fontSize: 13)),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () =>
+                                  setLocal(() => assignments.removeAt(e.key)),
+                            ),
+                          ],
+                        )),
+                    const Divider(height: 16),
+                  ],
+                  Text(isSerial ? 'Add serial number:' : 'Add lot number:',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: numberCtrl,
+                          decoration: InputDecoration(
+                            labelText: isSerial ? 'Serial #' : 'Lot #',
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      if (!isSerial) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: qtyCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Qty',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle),
+                        onPressed: () {
+                          final num = numberCtrl.text.trim();
+                          final qty = isSerial ? 1 : (int.tryParse(qtyCtrl.text.trim()) ?? 0);
+                          if (num.isEmpty || qty <= 0) return;
+                          setLocal(() {
+                            assignments.add(LotSerialAssignment(number: num, qty: qty));
+                            numberCtrl.clear();
+                            if (!isSerial) qtyCtrl.clear();
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: assignments.isEmpty
+                  ? null
+                  : () {
+                      final existing2 =
+                          app.scannedItems.any((s) => s.itemId == item.id);
+                      if (existing2) {
+                        app.updateLotSerial(item.id, assignments);
+                      } else {
+                        app.addCatalogItem(item, lotSerialAssignments: assignments);
+                      }
+                      HapticFeedback.selectionClick();
+                      Navigator.pop(ctx);
+                    },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    numberCtrl.dispose();
+    qtyCtrl.dispose();
+  }
+
   late final MobileScannerController _scanner = MobileScannerController(
     detectionSpeed: DetectionSpeed.normal,
     facing: Platform.isMacOS ? CameraFacing.front : CameraFacing.back,
@@ -30,47 +157,11 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
     super.dispose();
   }
 
-  void _showManualEntry(BuildContext context) {
-    final ctrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enter Barcode'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'UPC / barcode'),
-          onSubmitted: (v) {
-            if (v.trim().isNotEmpty) {
-              context.read<AppState>().addScanned(v.trim());
-              HapticFeedback.selectionClick();
-            }
-            Navigator.pop(ctx);
-          },
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              if (ctrl.text.trim().isNotEmpty) {
-                context.read<AppState>().addScanned(ctrl.text.trim());
-                HapticFeedback.selectionClick();
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _submitFlow(BuildContext context) async {
     final app = context.read<AppState>();
     final accountOptions = app.adjustmentAccounts;
     final firstAccount = accountOptions.isNotEmpty ? accountOptions.first.id : '';
     final accountCtrl = TextEditingController(text: firstAccount);
-    final subCtrl = TextEditingController(text: app.selectedLocation?.subsidiaryId ?? '');
     final memoCtrl = TextEditingController(text: 'Stock count adjustment');
     var selected = firstAccount.isEmpty ? 'custom' : firstAccount;
 
@@ -84,12 +175,13 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  value: selected,
+                  initialValue: selected,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Adjustment Account *'),
                   items: [
                     ...accountOptions.map((a) => DropdownMenuItem(
                           value: a.id,
-                          child: Text(a.name, overflow: TextOverflow.ellipsis),
+                          child: Text(a.name, overflow: TextOverflow.ellipsis, maxLines: 1),
                         )),
                     const DropdownMenuItem(value: 'custom', child: Text('Enter manually')),
                   ],
@@ -101,24 +193,24 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
                 ),
                 if (selected == 'custom') ...[
                   const SizedBox(height: 8),
-                  TextField(controller: accountCtrl, decoration: const InputDecoration(labelText: 'Account ID *')),
+                  TextField(
+                      controller: accountCtrl,
+                      decoration: const InputDecoration(labelText: 'Account ID *')),
                 ],
                 const SizedBox(height: 8),
                 TextField(
-                  controller: subCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Subsidiary ID',
-                    helperText: app.selectedLocation?.subsidiaryName,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(controller: memoCtrl, decoration: const InputDecoration(labelText: 'Memo')),
+                    controller: memoCtrl,
+                    decoration: const InputDecoration(labelText: 'Memo')),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continue')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continue')),
           ],
         ),
       ),
@@ -137,10 +229,15 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Confirm Submission'),
-        content: Text('Submit inventory adjustment?\n\nItems: ${app.scannedItems.length}\nAccount: $accountId'),
+        content: Text(
+            'Submit inventory adjustment?\n\nItems: ${app.scannedItems.length}\nAccount: $accountId'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Submit')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Submit')),
         ],
       ),
     );
@@ -150,19 +247,36 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
     try {
       final id = await context.read<AppState>().submitInventoryAdjustment(
             adjustmentAccountId: accountId,
-            subsidiaryId: subCtrl.text.trim().isEmpty ? null : subCtrl.text.trim(),
+            subsidiaryId: app.selectedLocation?.subsidiaryId,
             memo: memoCtrl.text.trim(),
           );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Adjustment created: $id'), backgroundColor: Colors.green.shade700),
+          SnackBar(
+              content: Text('Adjustment created: $id'),
+              backgroundColor: Colors.green.shade700),
         );
         Navigator.pop(context);
       }
     } catch (e) {
+      if (!context.mounted) return;
+      if (AppState.isAuthError(e) || e.toString().toLowerCase().contains('session expired')) {
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        return;
+      }
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Submit failed: $e'), backgroundColor: Colors.red.shade700),
+        final msg = e.toString().replaceFirst('Exception: ', '');
+        showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Submission Failed'),
+            content: SingleChildScrollView(child: Text(msg)),
+            actions: [
+              FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK')),
+            ],
+          ),
         );
       }
     }
@@ -173,11 +287,12 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
     final app = context.watch<AppState>();
     final colorScheme = Theme.of(context).colorScheme;
     final query = _searchCtrl.text.trim().toLowerCase();
-    final filteredCatalog = query.isEmpty
-        ? const <dynamic>[]
-        : app.catalogItems.where((it) {
-            return '${it.name} ${it.upc}'.toLowerCase().contains(query);
-          }).take(20).toList();
+    final List<InventoryItemModel> filteredCatalog = query.isEmpty
+        ? const []
+        : app.catalogItems
+            .where((it) => '${it.name} ${it.upc}'.toLowerCase().contains(query))
+            .take(20)
+            .toList();
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -187,7 +302,9 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
           children: [
             const Text('Scan Items', style: TextStyle(fontWeight: FontWeight.w700)),
             if (app.selectedLocation != null)
-              Text(app.selectedLocation!.name, style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+              Text(app.selectedLocation!.name,
+                  style:
+                      TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
           ],
         ),
         actions: [
@@ -195,200 +312,484 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
             TextButton.icon(
               onPressed: app.submitting ? null : () => _submitFlow(context),
               icon: app.submitting
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.cloud_upload_outlined, size: 18),
               label: Text(app.submitting ? 'Submitting…' : 'Submit'),
             ),
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          if (app.submitting) const LinearProgressIndicator(minHeight: 2),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // Wide (iPad / desktop ≥ 600 dp): camera left, list right
+          // Narrow (phone): camera top 40%, list bottom 60%
+          final isWide = constraints.maxWidth >= 600;
 
-          // Camera / fallback panel
-          Expanded(
-            flex: 5,
-            child: _cameraError
-                ? _NoCamera(
-                    itemCount: app.scannedItems.fold(0, (s, i) => s + i.qty),
-                    onManualEntry: () => _showManualEntry(context),
-                    onSearch: () => setState(() => _showSearch = !_showSearch),
-                    showSearch: _showSearch,
-                  )
-                : Stack(
-                    children: [
-                      MobileScanner(
-                        controller: _scanner,
-                        errorBuilder: (context, error, child) {
-                          debugPrint('[SCANNER] Error: $error');
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) setState(() => _cameraError = true);
-                          });
-                          return const SizedBox.expand(child: ColoredBox(color: Colors.black));
-                        },
-                        onDetect: (capture) {
-                          for (final b in capture.barcodes) {
-                            final code = b.rawValue;
-                            if (code != null && code.isNotEmpty) {
-                              app.addScanned(code);
-                              HapticFeedback.mediumImpact();
-                            }
-                          }
-                        },
-                      ),
-                      Center(
-                        child: Container(
-                          width: 220,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: colorScheme.primary, width: 2.5),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                      if (app.scannedItems.isNotEmpty)
-                        Positioned(
-                          top: 12,
-                          right: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '${app.scannedItems.fold(0, (s, i) => s + i.qty)} items',
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: colorScheme.onPrimaryContainer),
-                            ),
-                          ),
-                        ),
-                      Positioned(
-                        bottom: 12,
-                        right: 12,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            FloatingActionButton.small(
-                              heroTag: 'manual',
-                              onPressed: () => _showManualEntry(context),
-                              child: const Icon(Icons.keyboard),
-                            ),
-                            const SizedBox(height: 8),
-                            FloatingActionButton.small(
-                              heroTag: 'search',
-                              onPressed: () => setState(() => _showSearch = !_showSearch),
-                              child: Icon(_showSearch ? Icons.close : Icons.search),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
+          final cameraPanel = _cameraError
+              ? _NoCamera(
+                  itemCount: app.scannedItems.fold(0, (s, i) => s + i.qty),
+                  onSearch: () => setState(() => _showSearch = !_showSearch),
+                  showSearch: _showSearch,
+                )
+              : _CameraView(
+                  scanner: _scanner,
+                  app: app,
+                  colorScheme: colorScheme,
+                  showSearch: _showSearch,
+                  onToggleSearch: () => setState(() => _showSearch = !_showSearch),
+                  onError: () => setState(() => _cameraError = true),
+                  onLotSerialDetected: (item) =>
+                      _showLotSerialDialog(context, item),
+                );
 
-          // Search bar
-          if (_showSearch)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: 'Search by name or UPC',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  isDense: true,
-                ),
+          final itemsPanel = _ItemsPanel(
+            app: app,
+            colorScheme: colorScheme,
+            showSearch: _showSearch,
+            query: query,
+            filteredCatalog: filteredCatalog,
+            searchCtrl: _searchCtrl,
+            onSearchChanged: () => setState(() {}),
+            onLotSerialTap: (item) => _showLotSerialDialog(context, item),
+          );
+
+          return Column(
+            children: [
+              if (app.submitting) const LinearProgressIndicator(minHeight: 2),
+              Expanded(
+                child: isWide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(flex: 2, child: cameraPanel),
+                          const VerticalDivider(width: 1),
+                          Expanded(flex: 3, child: itemsPanel),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          Expanded(flex: 3, child: cameraPanel),
+                          const Divider(height: 1),
+                          Expanded(flex: 7, child: itemsPanel),
+                        ],
+                      ),
               ),
-            ),
-
-          // Search results
-          if (_showSearch && query.isNotEmpty)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 160),
-              child: filteredCatalog.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text('No matches', style: TextStyle(color: colorScheme.onSurfaceVariant)),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: filteredCatalog.length,
-                      itemBuilder: (_, i) {
-                        final p = filteredCatalog[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text(p.name),
-                          subtitle: Text(p.upc),
-                          trailing: const Icon(Icons.add_circle_outline, size: 20),
-                          onTap: () {
-                            app.addScanned(p.upc);
-                            HapticFeedback.selectionClick();
-                          },
-                        );
-                      },
-                    ),
-            ),
-
-          // Scanned items list
-          Expanded(
-            flex: 4,
-            child: app.scannedItems.isEmpty
-                ? Center(child: Text('Scan a barcode to start', style: TextStyle(color: colorScheme.onSurfaceVariant)))
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: app.scannedItems.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
-                    itemBuilder: (_, i) {
-                      final it = app.scannedItems[i];
-                      return ListTile(
-                        dense: true,
-                        title: Text(it.name, style: const TextStyle(fontWeight: FontWeight.w500)),
-                        subtitle: Text(it.upc, style: const TextStyle(fontSize: 12)),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.remove_circle_outline, size: 20),
-                              onPressed: () => app.decreaseQty(it.itemId),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            SizedBox(
-                              width: 28,
-                              child: Text('${it.qty}',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.add_circle_outline, size: 20),
-                              onPressed: () => app.increaseQty(it.itemId),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-/// Shown when no camera is available — provides manual entry and search as primary inputs.
+// ── Camera view ───────────────────────────────────────────────────────────────
+
+class _CameraView extends StatelessWidget {
+  final MobileScannerController scanner;
+  final AppState app;
+  final ColorScheme colorScheme;
+  final bool showSearch;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onError;
+  final void Function(InventoryItemModel item)? onLotSerialDetected;
+
+  const _CameraView({
+    required this.scanner,
+    required this.app,
+    required this.colorScheme,
+    required this.showSearch,
+    required this.onToggleSearch,
+    required this.onError,
+    this.onLotSerialDetected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        MobileScanner(
+          controller: scanner,
+          errorBuilder: (context, error, child) {
+            debugPrint('[SCANNER] Error: $error');
+            WidgetsBinding.instance.addPostFrameCallback((_) => onError());
+            return const SizedBox.expand(child: ColoredBox(color: Colors.black));
+          },
+          onDetect: (capture) {
+            for (final b in capture.barcodes) {
+              final code = b.rawValue;
+              if (code != null && code.isNotEmpty) {
+                final matched = app.findItemByBarcode(code);
+                if (matched != null &&
+                    (matched.isLotItem || matched.isSerialItem) &&
+                    onLotSerialDetected != null) {
+                  onLotSerialDetected!(matched);
+                } else {
+                  app.addScanned(code);
+                  HapticFeedback.mediumImpact();
+                }
+              }
+            }
+          },
+        ),
+
+        // Left/right scrims
+        const _ScanScrim(),
+
+        // Corner-marker frame
+        const Center(child: _ScanFrame()),
+
+        // Item count badge
+        if (app.scannedItems.isNotEmpty)
+          Positioned(
+            top: 12,
+            left: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 14),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${app.scannedItems.fold(0, (s, i) => s + i.qty)} items',
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Search toggle icon — bottom right
+        Positioned(
+          bottom: 12,
+          right: 12,
+          child: GestureDetector(
+            onTap: onToggleSearch,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: showSearch ? colorScheme.primary : Colors.black54,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                showSearch ? Icons.close : Icons.search,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Items panel ───────────────────────────────────────────────────────────────
+
+class _ItemsPanel extends StatelessWidget {
+  final AppState app;
+  final ColorScheme colorScheme;
+  final bool showSearch;
+  final String query;
+  final List<InventoryItemModel> filteredCatalog;
+  final TextEditingController searchCtrl;
+  final VoidCallback onSearchChanged;
+  final void Function(InventoryItemModel item) onLotSerialTap;
+
+  const _ItemsPanel({
+    required this.app,
+    required this.colorScheme,
+    required this.showSearch,
+    required this.query,
+    required this.filteredCatalog,
+    required this.searchCtrl,
+    required this.onSearchChanged,
+    required this.onLotSerialTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        if (showSearch)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: TextField(
+              controller: searchCtrl,
+              autofocus: true,
+              onChanged: (_) => onSearchChanged(),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Name or UPC',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                isDense: true,
+              ),
+            ),
+          ),
+        if (showSearch && query.isNotEmpty)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 180),
+            child: filteredCatalog.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text('No matches',
+                        style: TextStyle(color: colorScheme.onSurfaceVariant)),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: filteredCatalog.length,
+                    itemBuilder: (_, i) {
+                      final p = filteredCatalog[i];
+                      final isLotSerial = p.isLotItem || p.isSerialItem;
+                      return ListTile(
+                        dense: true,
+                        title: Text(p.name),
+                        subtitle: Text(
+                          isLotSerial
+                              ? (p.isSerialItem ? 'Serialised' : 'Lot-numbered')
+                              : (p.upc.isEmpty ? 'No barcode' : p.upc),
+                          style: TextStyle(
+                              color: isLotSerial
+                                  ? colorScheme.primary
+                                  : p.upc.isEmpty
+                                      ? colorScheme.outline
+                                      : colorScheme.onSurfaceVariant),
+                        ),
+                        trailing: Icon(
+                          isLotSerial
+                              ? Icons.list_alt_outlined
+                              : Icons.add_circle_outline,
+                          size: 20,
+                          color: isLotSerial ? colorScheme.primary : null,
+                        ),
+                        onTap: () {
+                          if (isLotSerial) {
+                            onLotSerialTap(p);
+                          } else {
+                            app.addCatalogItem(p);
+                            HapticFeedback.selectionClick();
+                          }
+                        },
+                      );
+                    },
+                  ),
+          ),
+        if (showSearch) const Divider(height: 1),
+        Expanded(
+          child: app.scannedItems.isEmpty
+              ? Center(
+                  child: Text('Scan a barcode to start',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant)))
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: app.scannedItems.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                  itemBuilder: (_, i) {
+                    final it = app.scannedItems[i];
+                    final isUnmatched = it.itemId.startsWith('unknown:');
+                    // Cross-check catalog for up-to-date lot/serial flags in case
+                    // the ScannedItem was loaded from a stale DB row.
+                    final catalogEntry = app.catalogItems
+                        .where((c) => c.id == it.itemId)
+                        .firstOrNull;
+                    final isLotSerial = (catalogEntry?.isLotItem ?? it.isLotItem) ||
+                        (catalogEntry?.isSerialItem ?? it.isSerialItem);
+                    final needsDetail = isLotSerial && it.lotSerialAssignments.isEmpty;
+
+                    String subtitle;
+                    Color? subtitleColor;
+                    if (isUnmatched) {
+                      subtitle = 'Not matched — use Search to add';
+                      subtitleColor = colorScheme.error.withValues(alpha: 0.7);
+                    } else if (needsDetail) {
+                      subtitle = 'Tap to enter ${it.isSerialItem ? 'serial' : 'lot'} numbers';
+                      subtitleColor = colorScheme.error;
+                    } else if (isLotSerial && it.lotSerialAssignments.isNotEmpty) {
+                      subtitle = it.lotSerialAssignments
+                          .map((a) => '${a.number} ×${a.qty}')
+                          .join(', ');
+                      subtitleColor = colorScheme.onSurfaceVariant;
+                    } else {
+                      subtitle = it.upc;
+                      subtitleColor = null;
+                    }
+
+                    return ListTile(
+                      dense: true,
+                      onTap: isLotSerial && !isUnmatched
+                          ? () {
+                              if (catalogEntry != null) {
+                                onLotSerialTap(catalogEntry);
+                              }
+                            }
+                          : null,
+                      leading: isUnmatched
+                          ? Tooltip(
+                              message:
+                                  'Barcode not found in inventory — will be skipped on submit',
+                              child: Icon(Icons.warning_amber_rounded,
+                                  color: colorScheme.error, size: 20),
+                            )
+                          : needsDetail
+                              ? Icon(Icons.warning_amber_rounded,
+                                  color: colorScheme.error, size: 20)
+                              : null,
+                      title: Text(
+                        it.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: isUnmatched || needsDetail
+                              ? colorScheme.error
+                              : null,
+                        ),
+                      ),
+                      subtitle: Text(
+                        subtitle,
+                        style: TextStyle(fontSize: 12, color: subtitleColor),
+                      ),
+                      trailing: isLotSerial && !isUnmatched
+                          ? IconButton(
+                              icon: Icon(
+                                Icons.edit_note,
+                                size: 20,
+                                color: needsDetail
+                                    ? colorScheme.error
+                                    : colorScheme.primary,
+                              ),
+                              onPressed: catalogEntry != null
+                                  ? () => onLotSerialTap(catalogEntry)
+                                  : null,
+                              visualDensity: VisualDensity.compact,
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline,
+                                      size: 20),
+                                  onPressed: () => app.decreaseQty(it.itemId),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                SizedBox(
+                                  width: 28,
+                                  child: Text('${it.qty}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16)),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline,
+                                      size: 20),
+                                  onPressed: () => app.increaseQty(it.itemId),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ],
+                            ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Scan overlay widgets ──────────────────────────────────────────────────────
+
+class _ScanScrim extends StatelessWidget {
+  const _ScanScrim();
+
+  @override
+  Widget build(BuildContext context) {
+    // Use a fraction of the available space so it never overflows.
+    return LayoutBuilder(builder: (context, constraints) {
+      final frameW = (constraints.maxWidth * 0.55).clamp(160.0, 280.0);
+      final side = (constraints.maxWidth - frameW) / 2;
+      return Row(
+        children: [
+          SizedBox(width: side, child: Container(color: Colors.black45)),
+          SizedBox(width: frameW),
+          SizedBox(width: side, child: Container(color: Colors.black45)),
+        ],
+      );
+    });
+  }
+}
+
+class _ScanFrame extends StatelessWidget {
+  const _ScanFrame();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return LayoutBuilder(builder: (context, constraints) {
+      final w = (constraints.maxWidth * 0.55).clamp(160.0, 280.0);
+      final h = (constraints.maxHeight * 0.55).clamp(80.0, 150.0);
+      return SizedBox(
+        width: w,
+        height: h,
+        child: CustomPaint(painter: _CornerPainter(color: color)),
+      );
+    });
+  }
+}
+
+class _CornerPainter extends CustomPainter {
+  final Color color;
+  const _CornerPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    const len = 28.0;
+
+    // top-left
+    canvas.drawLine(Offset.zero, const Offset(len, 0), paint);
+    canvas.drawLine(Offset.zero, Offset(0, len), paint);
+    // top-right
+    canvas.drawLine(Offset(size.width, 0), Offset(size.width - len, 0), paint);
+    canvas.drawLine(Offset(size.width, 0), Offset(size.width, len), paint);
+    // bottom-left
+    canvas.drawLine(Offset(0, size.height), Offset(len, size.height), paint);
+    canvas.drawLine(Offset(0, size.height), Offset(0, size.height - len), paint);
+    // bottom-right
+    canvas.drawLine(Offset(size.width, size.height),
+        Offset(size.width - len, size.height), paint);
+    canvas.drawLine(Offset(size.width, size.height),
+        Offset(size.width, size.height - len), paint);
+  }
+
+  @override
+  bool shouldRepaint(_CornerPainter old) => old.color != color;
+}
+
+// ── No-camera fallback ────────────────────────────────────────────────────────
+
 class _NoCamera extends StatelessWidget {
   final int itemCount;
-  final VoidCallback onManualEntry;
   final VoidCallback onSearch;
   final bool showSearch;
 
   const _NoCamera({
     required this.itemCount,
-    required this.onManualEntry,
     required this.onSearch,
     required this.showSearch,
   });
@@ -396,49 +797,64 @@ class _NoCamera extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      color: colorScheme.surfaceContainerHighest,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.qr_code_scanner, size: 52, color: colorScheme.onSurfaceVariant),
-          const SizedBox(height: 12),
-          Text('Camera not available', style: TextStyle(fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
-          const SizedBox(height: 4),
-          Text('Use keyboard entry or search below', style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 24),
-          Row(
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(
+          width: double.infinity,
+          color: colorScheme.surfaceContainerHighest,
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              FilledButton.icon(
-                onPressed: onManualEntry,
-                icon: const Icon(Icons.keyboard),
-                label: const Text('Enter Barcode'),
-              ),
-              const SizedBox(width: 12),
-              OutlinedButton.icon(
-                onPressed: onSearch,
-                icon: Icon(showSearch ? Icons.close : Icons.search),
-                label: Text(showSearch ? 'Close Search' : 'Search Items'),
-              ),
+              Icon(Icons.qr_code_scanner, size: 40, color: colorScheme.onSurfaceVariant),
+              const SizedBox(height: 8),
+              Text('Camera not available',
+                  style: TextStyle(fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
+              const SizedBox(height: 2),
+              Text('Use search to add items',
+                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+              if (itemCount > 0) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$itemCount items scanned',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onPrimaryContainer),
+                  ),
+                ),
+              ],
             ],
           ),
-          if (itemCount > 0) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        ),
+        // Search icon — bottom right, matching camera view
+        Positioned(
+          bottom: 12,
+          right: 12,
+          child: GestureDetector(
+            onTap: onSearch,
+            child: Container(
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(20),
+                color: showSearch ? colorScheme.primary : Colors.black26,
+                shape: BoxShape.circle,
               ),
-              child: Text(
-                '$itemCount items scanned',
-                style: TextStyle(fontWeight: FontWeight.w600, color: colorScheme.onPrimaryContainer),
+              child: Icon(
+                showSearch ? Icons.close : Icons.search,
+                color: Colors.white,
+                size: 20,
               ),
             ),
-          ],
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
 }

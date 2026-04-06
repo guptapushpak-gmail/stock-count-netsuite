@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
@@ -172,44 +171,63 @@ class NetSuiteApi {
     required String accountId,
     required String token,
     required String locationId,
+    void Function(int totalDownloaded)? onProgress,
   }) async {
     final dio = Dio(BaseOptions(baseUrl: 'https://$accountId.suitetalk.api.netsuite.com'));
     final all = <InventoryItemModel>[];
     var offset = 0;
-    const limit = 200;
+    const limit = 1000;
 
     try {
+      // SuiteQL returns actual field values (including upccode) in one round-trip,
+      // unlike the REST list endpoint which only returns id + links.
       while (true) {
-        final res = await dio.get(
-          '/services/rest/record/v1/inventoryItem',
-          queryParameters: {
-            'limit': limit,
-            'offset': offset,
+        final res = await dio.post(
+          '/services/rest/query/v1/suiteql',
+          queryParameters: {'limit': limit, 'offset': offset},
+          data: {
+            'q': "SELECT id, itemid, displayname, upccode, islotitem, isserialitem FROM InventoryItem WHERE isinactive = 'F' ORDER BY id",
           },
-          options: Options(headers: {'Authorization': 'Bearer $token'}),
+          options: Options(headers: {
+            'Authorization': 'Bearer $token',
+            'Prefer': 'transient',
+            'Content-Type': 'application/json',
+          }),
         );
 
         final items = (res.data['items'] as List?) ?? const [];
-        all.addAll(
-          items
-              .whereType<Map<String, dynamic>>()
-              .map(InventoryItemModel.fromJson)
-              .where((e) => e.id.isNotEmpty)
-              .toList(growable: false),
-        );
+        for (final e in items.whereType<Map<String, dynamic>>()) {
+          final id = (e['id'] ?? '').toString().trim();
+          if (id.isEmpty) continue;
+          // Skip lot-numbered and serialized items — they require inventory
+          // detail (lot/serial numbers) which inventory adjustments via REST
+          // cannot provide without additional complexity.
+          final isLot = (e['islotitem'] ?? 'F').toString().toUpperCase() == 'T';
+          final isSerial = (e['isserialitem'] ?? 'F').toString().toUpperCase() == 'T';
+          final name = ((e['displayname'] ?? e['itemid'] ?? '').toString()).trim();
+          final upc = (e['upccode'] ?? '').toString().trim();
+          all.add(InventoryItemModel(
+            id: id,
+            name: name.isEmpty ? 'Item $id' : name,
+            upc: upc,
+            isLotItem: isLot,
+            isSerialItem: isSerial,
+          ));
+        }
+        onProgress?.call(all.length);
 
         final hasMore = res.data['hasMore'] == true;
         if (!hasMore || items.isEmpty) break;
         offset += limit;
       }
 
-      // Keep only items with UPC for scan-first workflow, unique by UPC.
-      final byUpc = <String, InventoryItemModel>{};
+      // Deduplicate by item ID. Items without a UPC can still be found by
+      // name search; UPC is used for barcode matching only.
+      final byId = <String, InventoryItemModel>{};
       for (final item in all) {
-        if (item.upc.isEmpty) continue;
-        byUpc[item.upc] = item;
+        byId[item.id] = item;
       }
-      return byUpc.values.toList(growable: false);
+      return byId.values.toList();
     } on DioException catch (e) {
       throw Exception(
         'Download failed: status=${e.response?.statusCode}, '
@@ -227,7 +245,7 @@ class NetSuiteApi {
       final q = await dio.post(
         '/services/rest/query/v1/suiteql',
         data: {
-          'q': "SELECT id, acctnumber, acctname FROM account WHERE isinactive = 'F' ORDER BY acctnumber",
+          'q': "SELECT id, acctnumber, fullname, accttype FROM account WHERE isinactive = 'F' AND accttype IN ('Expense', 'CostOfGoodsSold', 'OthExpense') ORDER BY acctnumber",
         },
         options: Options(headers: {
           'Authorization': 'Bearer $token',
@@ -242,10 +260,10 @@ class NetSuiteApi {
           .map((e) {
             final id = _asString(e['id']);
             final num = _asString(e['acctnumber']);
-            final name = _asString(e['acctname']);
+            final name = _asString(e['fullname'] ?? e['name'] ?? e['acctname'] ?? '');
             return AdjustmentAccountModel(
               id: id,
-              name: [num, name].where((v) => v.isNotEmpty).join(' - '),
+              name: name.isNotEmpty ? name : num,
             );
           })
           .where((a) => a.id.isNotEmpty)
@@ -321,13 +339,31 @@ class NetSuiteApi {
           ? 'Stock count adjustment from mobile app'
           : memo.trim(),
       'inventory': {
-        'items': lines
-            .map((l) => {
-                  'item': {'id': l['itemId'].toString()},
-                  'location': {'id': locationId},
-                  'adjustQtyBy': l['adjustQtyBy'],
-                })
-            .toList(growable: false),
+        'items': lines.map((l) {
+          final lineMap = <String, dynamic>{
+            'item': {'id': l['itemId'].toString()},
+            'location': {'id': locationId},
+            'adjustQtyBy': l['adjustQtyBy'],
+          };
+          final assignments =
+              l['lotSerialAssignments'] as List<Map<String, dynamic>>?;
+          if (assignments != null && assignments.isNotEmpty) {
+            final isSerial = l['isSerialItem'] == true;
+            lineMap['inventoryDetail'] = {
+              'items': assignments.map((a) {
+                if (isSerial) {
+                  return {'serialNumber': a['number'], 'quantity': a['qty']};
+                } else {
+                  return {
+                    'lotNumberDate': {'lotNumber': a['number']},
+                    'quantity': a['qty'],
+                  };
+                }
+              }).toList(),
+            };
+          }
+          return lineMap;
+        }).toList(growable: false),
       },
     };
 
@@ -362,6 +398,96 @@ class NetSuiteApi {
         'url=${e.requestOptions.uri}, data=${e.response?.data}',
       );
     }
+  }
+
+  /// Fetches the display name, email, and role name for the currently logged-in user.
+  Future<({String name, String email, String roleName})> fetchUserInfo({
+    required String accountId,
+    required String token,
+    String? entityId,
+    String? roleId,
+  }) async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://$accountId.suitetalk.api.netsuite.com'));
+    final headers = {'Authorization': 'Bearer $token', 'Prefer': 'transient', 'Content-Type': 'application/json'};
+
+    String name = '';
+    String email = '';
+    String roleName = '';
+
+    // Fetch employee/contact name and email from the entity id
+    if (entityId != null && entityId.isNotEmpty) {
+      try {
+        final resp = await dio.post(
+          '/services/rest/query/v1/suiteql',
+          data: {'q': 'SELECT id, entityid, email, firstname, lastname FROM employee WHERE id = $entityId'},
+          options: Options(headers: headers),
+        );
+        final items = (resp.data['items'] as List?) ?? [];
+        if (items.isNotEmpty) {
+          final row = items.first as Map<String, dynamic>;
+          final first = _asString(row['firstname']);
+          final last = _asString(row['lastname']);
+          name = '$first $last'.trim();
+          if (name.isEmpty) name = _asString(row['entityid']);
+          email = _asString(row['email']);
+        }
+      } catch (_) {}
+    }
+
+    // Fetch role name
+    if (roleId != null && roleId.isNotEmpty) {
+      try {
+        final resp = await dio.post(
+          '/services/rest/query/v1/suiteql',
+          data: {'q': 'SELECT id, name FROM role WHERE id = $roleId'},
+          options: Options(headers: headers),
+        );
+        final items = (resp.data['items'] as List?) ?? [];
+        if (items.isNotEmpty) {
+          roleName = _asString((items.first as Map<String, dynamic>)['name']);
+        }
+      } catch (_) {}
+    }
+
+    return (name: name, email: email, roleName: roleName);
+  }
+
+  /// Returns `(itemId, isLotItem, isSerialItem)` for the given comma-separated IDs.
+  Future<List<(String, bool, bool)>> fetchLotSerialFlags({
+    required String accountId,
+    required String token,
+    required String itemIds,
+  }) async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://$accountId.suitetalk.api.netsuite.com'));
+    final result = <(String, bool, bool)>[];
+    var offset = 0;
+    const limit = 1000;
+
+    while (true) {
+      final resp = await dio.post(
+        '/services/rest/query/v1/suiteql',
+        queryParameters: {'limit': limit, 'offset': offset},
+        data: {
+          'q': 'SELECT id, islotitem, isserialitem FROM InventoryItem WHERE id IN ($itemIds)',
+        },
+        options: Options(headers: {
+          'Authorization': 'Bearer $token',
+          'Prefer': 'transient',
+          'Content-Type': 'application/json',
+        }),
+      );
+      final items = (resp.data['items'] as List?) ?? const [];
+      for (final row in items.whereType<Map<String, dynamic>>()) {
+        final id = _asString(row['id']);
+        if (id.isEmpty) continue;
+        final isLot = (row['islotitem'] ?? 'F').toString().toUpperCase() == 'T';
+        final isSerial = (row['isserialitem'] ?? 'F').toString().toUpperCase() == 'T';
+        result.add((id, isLot, isSerial));
+      }
+      if (resp.data['hasMore'] != true || items.isEmpty) break;
+      offset += limit;
+    }
+    return result;
   }
 
   Future<void> syncPendingChanges({required String accountId, required String token}) async {
@@ -418,7 +544,7 @@ class NetSuiteApi {
     // Strategy 2: companyInformation REST record.
     if (logoFileId == null || logoFileId.isEmpty) {
       for (final recType in ['companyInformation', 'companyinformation', 'companyPreferences']) {
-        if (logoFileId != null && logoFileId!.isNotEmpty) break;
+        if (logoFileId != null && logoFileId.isNotEmpty) break;
         try {
           final resp = await dio.get(
             '/services/rest/record/v1/$recType',

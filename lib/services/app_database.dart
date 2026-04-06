@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -44,11 +43,14 @@ class CatalogItems extends Table {
   TextColumn get locationId => text()();
   TextColumn get name => text()();
   TextColumn get upc => text()();
+  BoolColumn get isLotItem => boolean().withDefault(const Constant(false))();
+  BoolColumn get isSerialItem => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id, locationId};
 }
 
+@DataClassName('DbSession')
 class CountSessions extends Table {
   TextColumn get id => text()();
   TextColumn get locationId => text()();
@@ -60,6 +62,7 @@ class CountSessions extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+@DataClassName('DbScannedItem')
 class ScannedItems extends Table {
   IntColumn get rowId => integer().autoIncrement()();
   TextColumn get sessionId => text()();
@@ -67,6 +70,9 @@ class ScannedItems extends Table {
   TextColumn get upc => text()();
   TextColumn get name => text()();
   IntColumn get qty => integer()();
+  BoolColumn get isLotItem => boolean().withDefault(const Constant(false))();
+  BoolColumn get isSerialItem => boolean().withDefault(const Constant(false))();
+  TextColumn get lotSerialData => text().nullable()();
 }
 
 // ── Database ─────────────────────────────────────────────────────────────────
@@ -83,7 +89,25 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await customStatement(
+            'ALTER TABLE catalog_items ADD COLUMN is_lot_item INTEGER NOT NULL DEFAULT 0');
+        await customStatement(
+            'ALTER TABLE catalog_items ADD COLUMN is_serial_item INTEGER NOT NULL DEFAULT 0');
+        await customStatement(
+            'ALTER TABLE scanned_items ADD COLUMN is_lot_item INTEGER NOT NULL DEFAULT 0');
+        await customStatement(
+            'ALTER TABLE scanned_items ADD COLUMN is_serial_item INTEGER NOT NULL DEFAULT 0');
+        await customStatement(
+            'ALTER TABLE scanned_items ADD COLUMN lot_serial_data TEXT');
+      }
+    },
+  );
 
   static LazyDatabase _openConnection() {
     return LazyDatabase(() async {
@@ -123,7 +147,7 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Locations ─────────────────────────────────────────────────────────────
 
-  Future<List<LocationsData>> getAllLocations() =>
+  Future<List<Location>> getAllLocations() =>
       (select(locations)..orderBy([(t) => OrderingTerm.asc(t.name)])).get();
 
   Future<void> replaceLocations(List<LocationsCompanion> rows) =>
@@ -134,7 +158,7 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Adjustment accounts ────────────────────────────────────────────────────
 
-  Future<List<AdjustmentAccountsData>> getAllAccounts() =>
+  Future<List<AdjustmentAccount>> getAllAccounts() =>
       select(adjustmentAccounts).get();
 
   Future<void> replaceAccounts(List<AdjustmentAccountsCompanion> rows) =>
@@ -145,7 +169,7 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Catalog items ─────────────────────────────────────────────────────────
 
-  Future<List<CatalogItemsData>> getItemsForLocation(String locationId) =>
+  Future<List<CatalogItem>> getItemsForLocation(String locationId) =>
       (select(catalogItems)..where((t) => t.locationId.equals(locationId))).get();
 
   Future<void> replaceItemsForLocation(
@@ -161,7 +185,7 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Count sessions ─────────────────────────────────────────────────────────
 
-  Future<List<CountSessionsData>> getAllSessions() =>
+  Future<List<DbSession>> getAllSessions() =>
       (select(countSessions)
             ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
           .get();
@@ -175,7 +199,7 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Scanned items ─────────────────────────────────────────────────────────
 
-  Future<List<ScannedItemsData>> getScannedItems(String sessionId) =>
+  Future<List<DbScannedItem>> getScannedItems(String sessionId) =>
       (select(scannedItems)..where((t) => t.sessionId.equals(sessionId))).get();
 
   Future<void> upsertScannedItem({
@@ -184,6 +208,9 @@ class AppDatabase extends _$AppDatabase {
     required String upc,
     required String name,
     required int qty,
+    bool isLotItem = false,
+    bool isSerialItem = false,
+    String? lotSerialData,
   }) async {
     final existing = await (select(scannedItems)
           ..where((t) =>
@@ -192,7 +219,10 @@ class AppDatabase extends _$AppDatabase {
     if (existing != null) {
       await (update(scannedItems)
             ..where((t) => t.rowId.equals(existing.rowId)))
-          .write(ScannedItemsCompanion(qty: Value(qty)));
+          .write(ScannedItemsCompanion(
+            qty: Value(qty),
+            lotSerialData: Value(lotSerialData),
+          ));
     } else {
       await into(scannedItems).insert(ScannedItemsCompanion.insert(
         sessionId: sessionId,
@@ -200,6 +230,9 @@ class AppDatabase extends _$AppDatabase {
         upc: upc,
         name: name,
         qty: qty,
+        isLotItem: Value(isLotItem),
+        isSerialItem: Value(isSerialItem),
+        lotSerialData: Value(lotSerialData),
       ));
     }
   }

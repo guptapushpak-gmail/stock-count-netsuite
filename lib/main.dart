@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'services/app_database.dart';
 import 'state/app_state.dart';
 import 'pages/auth_page.dart';
 import 'pages/location_list_page.dart';
 import 'pages/main_menu_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  final db = AppDatabase();
   runApp(
     ChangeNotifierProvider(
-      create: (_) => AppState()..bootstrap(),
+      create: (_) => AppState(db)..bootstrap(),
       child: const StockCountApp(),
     ),
   );
@@ -20,7 +23,7 @@ class StockCountApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NetStore Pro Next',
+      title: 'NetStore Next',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,

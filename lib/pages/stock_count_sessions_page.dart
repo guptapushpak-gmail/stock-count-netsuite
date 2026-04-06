@@ -32,7 +32,8 @@ class StockCountSessionsPage extends StatelessWidget {
           final session = CountSession(
             id: const Uuid().v4(),
             locationId: app.selectedLocation?.id ?? 'unknown',
-            status: 'started',
+            locationName: app.selectedLocation?.name ?? 'Unknown Location',
+            status: 'in_progress',
             createdAt: DateTime.now(),
           );
           context.read<AppState>().addSession(session);
@@ -67,14 +68,10 @@ class StockCountSessionsPage extends StatelessWidget {
               itemBuilder: (_, i) {
                 final s = app.sessions[i];
                 final sessionNumber = app.sessions.length - i;
-                final locationName = app.locations
-                    .where((l) => l.id == s.locationId)
-                    .map((l) => l.name)
-                    .firstOrNull ?? s.locationId;
                 return _SessionCard(
                   session: s,
                   sessionNumber: sessionNumber,
-                  locationName: locationName,
+                  locationName: s.locationName,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const StockCountScanPage()),
@@ -127,7 +124,7 @@ class _SessionCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.5)),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: InkWell(
         onTap: onTap,

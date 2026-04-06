@@ -953,8 +953,45 @@ class $CatalogItemsTable extends CatalogItems
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isLotItemMeta = const VerificationMeta(
+    'isLotItem',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, locationId, name, upc];
+  late final GeneratedColumn<bool> isLotItem = GeneratedColumn<bool>(
+    'is_lot_item',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_lot_item" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _isSerialItemMeta = const VerificationMeta(
+    'isSerialItem',
+  );
+  @override
+  late final GeneratedColumn<bool> isSerialItem = GeneratedColumn<bool>(
+    'is_serial_item',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_serial_item" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    locationId,
+    name,
+    upc,
+    isLotItem,
+    isSerialItem,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -996,6 +1033,21 @@ class $CatalogItemsTable extends CatalogItems
     } else if (isInserting) {
       context.missing(_upcMeta);
     }
+    if (data.containsKey('is_lot_item')) {
+      context.handle(
+        _isLotItemMeta,
+        isLotItem.isAcceptableOrUnknown(data['is_lot_item']!, _isLotItemMeta),
+      );
+    }
+    if (data.containsKey('is_serial_item')) {
+      context.handle(
+        _isSerialItemMeta,
+        isSerialItem.isAcceptableOrUnknown(
+          data['is_serial_item']!,
+          _isSerialItemMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1021,6 +1073,14 @@ class $CatalogItemsTable extends CatalogItems
         DriftSqlType.string,
         data['${effectivePrefix}upc'],
       )!,
+      isLotItem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_lot_item'],
+      )!,
+      isSerialItem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_serial_item'],
+      )!,
     );
   }
 
@@ -1035,11 +1095,15 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
   final String locationId;
   final String name;
   final String upc;
+  final bool isLotItem;
+  final bool isSerialItem;
   const CatalogItem({
     required this.id,
     required this.locationId,
     required this.name,
     required this.upc,
+    required this.isLotItem,
+    required this.isSerialItem,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1048,6 +1112,8 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
     map['location_id'] = Variable<String>(locationId);
     map['name'] = Variable<String>(name);
     map['upc'] = Variable<String>(upc);
+    map['is_lot_item'] = Variable<bool>(isLotItem);
+    map['is_serial_item'] = Variable<bool>(isSerialItem);
     return map;
   }
 
@@ -1057,6 +1123,8 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
       locationId: Value(locationId),
       name: Value(name),
       upc: Value(upc),
+      isLotItem: Value(isLotItem),
+      isSerialItem: Value(isSerialItem),
     );
   }
 
@@ -1070,6 +1138,8 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
       locationId: serializer.fromJson<String>(json['locationId']),
       name: serializer.fromJson<String>(json['name']),
       upc: serializer.fromJson<String>(json['upc']),
+      isLotItem: serializer.fromJson<bool>(json['isLotItem']),
+      isSerialItem: serializer.fromJson<bool>(json['isSerialItem']),
     );
   }
   @override
@@ -1080,6 +1150,8 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
       'locationId': serializer.toJson<String>(locationId),
       'name': serializer.toJson<String>(name),
       'upc': serializer.toJson<String>(upc),
+      'isLotItem': serializer.toJson<bool>(isLotItem),
+      'isSerialItem': serializer.toJson<bool>(isSerialItem),
     };
   }
 
@@ -1088,11 +1160,15 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
     String? locationId,
     String? name,
     String? upc,
+    bool? isLotItem,
+    bool? isSerialItem,
   }) => CatalogItem(
     id: id ?? this.id,
     locationId: locationId ?? this.locationId,
     name: name ?? this.name,
     upc: upc ?? this.upc,
+    isLotItem: isLotItem ?? this.isLotItem,
+    isSerialItem: isSerialItem ?? this.isSerialItem,
   );
   CatalogItem copyWithCompanion(CatalogItemsCompanion data) {
     return CatalogItem(
@@ -1102,6 +1178,10 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
           : this.locationId,
       name: data.name.present ? data.name.value : this.name,
       upc: data.upc.present ? data.upc.value : this.upc,
+      isLotItem: data.isLotItem.present ? data.isLotItem.value : this.isLotItem,
+      isSerialItem: data.isSerialItem.present
+          ? data.isSerialItem.value
+          : this.isSerialItem,
     );
   }
 
@@ -1111,13 +1191,16 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
           ..write('id: $id, ')
           ..write('locationId: $locationId, ')
           ..write('name: $name, ')
-          ..write('upc: $upc')
+          ..write('upc: $upc, ')
+          ..write('isLotItem: $isLotItem, ')
+          ..write('isSerialItem: $isSerialItem')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, locationId, name, upc);
+  int get hashCode =>
+      Object.hash(id, locationId, name, upc, isLotItem, isSerialItem);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1125,7 +1208,9 @@ class CatalogItem extends DataClass implements Insertable<CatalogItem> {
           other.id == this.id &&
           other.locationId == this.locationId &&
           other.name == this.name &&
-          other.upc == this.upc);
+          other.upc == this.upc &&
+          other.isLotItem == this.isLotItem &&
+          other.isSerialItem == this.isSerialItem);
 }
 
 class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
@@ -1133,12 +1218,16 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
   final Value<String> locationId;
   final Value<String> name;
   final Value<String> upc;
+  final Value<bool> isLotItem;
+  final Value<bool> isSerialItem;
   final Value<int> rowid;
   const CatalogItemsCompanion({
     this.id = const Value.absent(),
     this.locationId = const Value.absent(),
     this.name = const Value.absent(),
     this.upc = const Value.absent(),
+    this.isLotItem = const Value.absent(),
+    this.isSerialItem = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CatalogItemsCompanion.insert({
@@ -1146,6 +1235,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
     required String locationId,
     required String name,
     required String upc,
+    this.isLotItem = const Value.absent(),
+    this.isSerialItem = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        locationId = Value(locationId),
@@ -1156,6 +1247,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
     Expression<String>? locationId,
     Expression<String>? name,
     Expression<String>? upc,
+    Expression<bool>? isLotItem,
+    Expression<bool>? isSerialItem,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1163,6 +1256,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
       if (locationId != null) 'location_id': locationId,
       if (name != null) 'name': name,
       if (upc != null) 'upc': upc,
+      if (isLotItem != null) 'is_lot_item': isLotItem,
+      if (isSerialItem != null) 'is_serial_item': isSerialItem,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1172,6 +1267,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
     Value<String>? locationId,
     Value<String>? name,
     Value<String>? upc,
+    Value<bool>? isLotItem,
+    Value<bool>? isSerialItem,
     Value<int>? rowid,
   }) {
     return CatalogItemsCompanion(
@@ -1179,6 +1276,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
       locationId: locationId ?? this.locationId,
       name: name ?? this.name,
       upc: upc ?? this.upc,
+      isLotItem: isLotItem ?? this.isLotItem,
+      isSerialItem: isSerialItem ?? this.isSerialItem,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1198,6 +1297,12 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
     if (upc.present) {
       map['upc'] = Variable<String>(upc.value);
     }
+    if (isLotItem.present) {
+      map['is_lot_item'] = Variable<bool>(isLotItem.value);
+    }
+    if (isSerialItem.present) {
+      map['is_serial_item'] = Variable<bool>(isSerialItem.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1211,6 +1316,8 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
           ..write('locationId: $locationId, ')
           ..write('name: $name, ')
           ..write('upc: $upc, ')
+          ..write('isLotItem: $isLotItem, ')
+          ..write('isSerialItem: $isSerialItem, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1218,7 +1325,7 @@ class CatalogItemsCompanion extends UpdateCompanion<CatalogItem> {
 }
 
 class $CountSessionsTable extends CountSessions
-    with TableInfo<$CountSessionsTable, CountSession> {
+    with TableInfo<$CountSessionsTable, DbSession> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
@@ -1289,7 +1396,7 @@ class $CountSessionsTable extends CountSessions
   static const String $name = 'count_sessions';
   @override
   VerificationContext validateIntegrity(
-    Insertable<CountSession> instance, {
+    Insertable<DbSession> instance, {
     bool isInserting = false,
   }) {
     final context = VerificationContext();
@@ -1340,9 +1447,9 @@ class $CountSessionsTable extends CountSessions
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  CountSession map(Map<String, dynamic> data, {String? tablePrefix}) {
+  DbSession map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return CountSession(
+    return DbSession(
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -1372,13 +1479,13 @@ class $CountSessionsTable extends CountSessions
   }
 }
 
-class CountSession extends DataClass implements Insertable<CountSession> {
+class DbSession extends DataClass implements Insertable<DbSession> {
   final String id;
   final String locationId;
   final String locationName;
   final String status;
   final DateTime createdAt;
-  const CountSession({
+  const DbSession({
     required this.id,
     required this.locationId,
     required this.locationName,
@@ -1406,12 +1513,12 @@ class CountSession extends DataClass implements Insertable<CountSession> {
     );
   }
 
-  factory CountSession.fromJson(
+  factory DbSession.fromJson(
     Map<String, dynamic> json, {
     ValueSerializer? serializer,
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return CountSession(
+    return DbSession(
       id: serializer.fromJson<String>(json['id']),
       locationId: serializer.fromJson<String>(json['locationId']),
       locationName: serializer.fromJson<String>(json['locationName']),
@@ -1431,21 +1538,21 @@ class CountSession extends DataClass implements Insertable<CountSession> {
     };
   }
 
-  CountSession copyWith({
+  DbSession copyWith({
     String? id,
     String? locationId,
     String? locationName,
     String? status,
     DateTime? createdAt,
-  }) => CountSession(
+  }) => DbSession(
     id: id ?? this.id,
     locationId: locationId ?? this.locationId,
     locationName: locationName ?? this.locationName,
     status: status ?? this.status,
     createdAt: createdAt ?? this.createdAt,
   );
-  CountSession copyWithCompanion(CountSessionsCompanion data) {
-    return CountSession(
+  DbSession copyWithCompanion(CountSessionsCompanion data) {
+    return DbSession(
       id: data.id.present ? data.id.value : this.id,
       locationId: data.locationId.present
           ? data.locationId.value
@@ -1460,7 +1567,7 @@ class CountSession extends DataClass implements Insertable<CountSession> {
 
   @override
   String toString() {
-    return (StringBuffer('CountSession(')
+    return (StringBuffer('DbSession(')
           ..write('id: $id, ')
           ..write('locationId: $locationId, ')
           ..write('locationName: $locationName, ')
@@ -1476,7 +1583,7 @@ class CountSession extends DataClass implements Insertable<CountSession> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is CountSession &&
+      (other is DbSession &&
           other.id == this.id &&
           other.locationId == this.locationId &&
           other.locationName == this.locationName &&
@@ -1484,7 +1591,7 @@ class CountSession extends DataClass implements Insertable<CountSession> {
           other.createdAt == this.createdAt);
 }
 
-class CountSessionsCompanion extends UpdateCompanion<CountSession> {
+class CountSessionsCompanion extends UpdateCompanion<DbSession> {
   final Value<String> id;
   final Value<String> locationId;
   final Value<String> locationName;
@@ -1511,7 +1618,7 @@ class CountSessionsCompanion extends UpdateCompanion<CountSession> {
        locationName = Value(locationName),
        status = Value(status),
        createdAt = Value(createdAt);
-  static Insertable<CountSession> custom({
+  static Insertable<DbSession> custom({
     Expression<String>? id,
     Expression<String>? locationId,
     Expression<String>? locationName,
@@ -1586,7 +1693,7 @@ class CountSessionsCompanion extends UpdateCompanion<CountSession> {
 }
 
 class $ScannedItemsTable extends ScannedItems
-    with TableInfo<$ScannedItemsTable, ScannedItem> {
+    with TableInfo<$ScannedItemsTable, DbScannedItem> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
@@ -1651,6 +1758,47 @@ class $ScannedItemsTable extends ScannedItems
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isLotItemMeta = const VerificationMeta(
+    'isLotItem',
+  );
+  @override
+  late final GeneratedColumn<bool> isLotItem = GeneratedColumn<bool>(
+    'is_lot_item',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_lot_item" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _isSerialItemMeta = const VerificationMeta(
+    'isSerialItem',
+  );
+  @override
+  late final GeneratedColumn<bool> isSerialItem = GeneratedColumn<bool>(
+    'is_serial_item',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_serial_item" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _lotSerialDataMeta = const VerificationMeta(
+    'lotSerialData',
+  );
+  @override
+  late final GeneratedColumn<String> lotSerialData = GeneratedColumn<String>(
+    'lot_serial_data',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     rowId,
@@ -1659,6 +1807,9 @@ class $ScannedItemsTable extends ScannedItems
     upc,
     name,
     qty,
+    isLotItem,
+    isSerialItem,
+    lotSerialData,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1667,7 +1818,7 @@ class $ScannedItemsTable extends ScannedItems
   static const String $name = 'scanned_items';
   @override
   VerificationContext validateIntegrity(
-    Insertable<ScannedItem> instance, {
+    Insertable<DbScannedItem> instance, {
     bool isInserting = false,
   }) {
     final context = VerificationContext();
@@ -1718,15 +1869,39 @@ class $ScannedItemsTable extends ScannedItems
     } else if (isInserting) {
       context.missing(_qtyMeta);
     }
+    if (data.containsKey('is_lot_item')) {
+      context.handle(
+        _isLotItemMeta,
+        isLotItem.isAcceptableOrUnknown(data['is_lot_item']!, _isLotItemMeta),
+      );
+    }
+    if (data.containsKey('is_serial_item')) {
+      context.handle(
+        _isSerialItemMeta,
+        isSerialItem.isAcceptableOrUnknown(
+          data['is_serial_item']!,
+          _isSerialItemMeta,
+        ),
+      );
+    }
+    if (data.containsKey('lot_serial_data')) {
+      context.handle(
+        _lotSerialDataMeta,
+        lotSerialData.isAcceptableOrUnknown(
+          data['lot_serial_data']!,
+          _lotSerialDataMeta,
+        ),
+      );
+    }
     return context;
   }
 
   @override
   Set<GeneratedColumn> get $primaryKey => {rowId};
   @override
-  ScannedItem map(Map<String, dynamic> data, {String? tablePrefix}) {
+  DbScannedItem map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return ScannedItem(
+    return DbScannedItem(
       rowId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}row_id'],
@@ -1751,6 +1926,18 @@ class $ScannedItemsTable extends ScannedItems
         DriftSqlType.int,
         data['${effectivePrefix}qty'],
       )!,
+      isLotItem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_lot_item'],
+      )!,
+      isSerialItem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_serial_item'],
+      )!,
+      lotSerialData: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}lot_serial_data'],
+      ),
     );
   }
 
@@ -1760,20 +1947,26 @@ class $ScannedItemsTable extends ScannedItems
   }
 }
 
-class ScannedItem extends DataClass implements Insertable<ScannedItem> {
+class DbScannedItem extends DataClass implements Insertable<DbScannedItem> {
   final int rowId;
   final String sessionId;
   final String itemId;
   final String upc;
   final String name;
   final int qty;
-  const ScannedItem({
+  final bool isLotItem;
+  final bool isSerialItem;
+  final String? lotSerialData;
+  const DbScannedItem({
     required this.rowId,
     required this.sessionId,
     required this.itemId,
     required this.upc,
     required this.name,
     required this.qty,
+    required this.isLotItem,
+    required this.isSerialItem,
+    this.lotSerialData,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1784,6 +1977,11 @@ class ScannedItem extends DataClass implements Insertable<ScannedItem> {
     map['upc'] = Variable<String>(upc);
     map['name'] = Variable<String>(name);
     map['qty'] = Variable<int>(qty);
+    map['is_lot_item'] = Variable<bool>(isLotItem);
+    map['is_serial_item'] = Variable<bool>(isSerialItem);
+    if (!nullToAbsent || lotSerialData != null) {
+      map['lot_serial_data'] = Variable<String>(lotSerialData);
+    }
     return map;
   }
 
@@ -1795,21 +1993,29 @@ class ScannedItem extends DataClass implements Insertable<ScannedItem> {
       upc: Value(upc),
       name: Value(name),
       qty: Value(qty),
+      isLotItem: Value(isLotItem),
+      isSerialItem: Value(isSerialItem),
+      lotSerialData: lotSerialData == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lotSerialData),
     );
   }
 
-  factory ScannedItem.fromJson(
+  factory DbScannedItem.fromJson(
     Map<String, dynamic> json, {
     ValueSerializer? serializer,
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return ScannedItem(
+    return DbScannedItem(
       rowId: serializer.fromJson<int>(json['rowId']),
       sessionId: serializer.fromJson<String>(json['sessionId']),
       itemId: serializer.fromJson<String>(json['itemId']),
       upc: serializer.fromJson<String>(json['upc']),
       name: serializer.fromJson<String>(json['name']),
       qty: serializer.fromJson<int>(json['qty']),
+      isLotItem: serializer.fromJson<bool>(json['isLotItem']),
+      isSerialItem: serializer.fromJson<bool>(json['isSerialItem']),
+      lotSerialData: serializer.fromJson<String?>(json['lotSerialData']),
     );
   }
   @override
@@ -1822,69 +2028,106 @@ class ScannedItem extends DataClass implements Insertable<ScannedItem> {
       'upc': serializer.toJson<String>(upc),
       'name': serializer.toJson<String>(name),
       'qty': serializer.toJson<int>(qty),
+      'isLotItem': serializer.toJson<bool>(isLotItem),
+      'isSerialItem': serializer.toJson<bool>(isSerialItem),
+      'lotSerialData': serializer.toJson<String?>(lotSerialData),
     };
   }
 
-  ScannedItem copyWith({
+  DbScannedItem copyWith({
     int? rowId,
     String? sessionId,
     String? itemId,
     String? upc,
     String? name,
     int? qty,
-  }) => ScannedItem(
+    bool? isLotItem,
+    bool? isSerialItem,
+    Value<String?> lotSerialData = const Value.absent(),
+  }) => DbScannedItem(
     rowId: rowId ?? this.rowId,
     sessionId: sessionId ?? this.sessionId,
     itemId: itemId ?? this.itemId,
     upc: upc ?? this.upc,
     name: name ?? this.name,
     qty: qty ?? this.qty,
+    isLotItem: isLotItem ?? this.isLotItem,
+    isSerialItem: isSerialItem ?? this.isSerialItem,
+    lotSerialData: lotSerialData.present
+        ? lotSerialData.value
+        : this.lotSerialData,
   );
-  ScannedItem copyWithCompanion(ScannedItemsCompanion data) {
-    return ScannedItem(
+  DbScannedItem copyWithCompanion(ScannedItemsCompanion data) {
+    return DbScannedItem(
       rowId: data.rowId.present ? data.rowId.value : this.rowId,
       sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
       itemId: data.itemId.present ? data.itemId.value : this.itemId,
       upc: data.upc.present ? data.upc.value : this.upc,
       name: data.name.present ? data.name.value : this.name,
       qty: data.qty.present ? data.qty.value : this.qty,
+      isLotItem: data.isLotItem.present ? data.isLotItem.value : this.isLotItem,
+      isSerialItem: data.isSerialItem.present
+          ? data.isSerialItem.value
+          : this.isSerialItem,
+      lotSerialData: data.lotSerialData.present
+          ? data.lotSerialData.value
+          : this.lotSerialData,
     );
   }
 
   @override
   String toString() {
-    return (StringBuffer('ScannedItem(')
+    return (StringBuffer('DbScannedItem(')
           ..write('rowId: $rowId, ')
           ..write('sessionId: $sessionId, ')
           ..write('itemId: $itemId, ')
           ..write('upc: $upc, ')
           ..write('name: $name, ')
-          ..write('qty: $qty')
+          ..write('qty: $qty, ')
+          ..write('isLotItem: $isLotItem, ')
+          ..write('isSerialItem: $isSerialItem, ')
+          ..write('lotSerialData: $lotSerialData')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(rowId, sessionId, itemId, upc, name, qty);
+  int get hashCode => Object.hash(
+    rowId,
+    sessionId,
+    itemId,
+    upc,
+    name,
+    qty,
+    isLotItem,
+    isSerialItem,
+    lotSerialData,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is ScannedItem &&
+      (other is DbScannedItem &&
           other.rowId == this.rowId &&
           other.sessionId == this.sessionId &&
           other.itemId == this.itemId &&
           other.upc == this.upc &&
           other.name == this.name &&
-          other.qty == this.qty);
+          other.qty == this.qty &&
+          other.isLotItem == this.isLotItem &&
+          other.isSerialItem == this.isSerialItem &&
+          other.lotSerialData == this.lotSerialData);
 }
 
-class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
+class ScannedItemsCompanion extends UpdateCompanion<DbScannedItem> {
   final Value<int> rowId;
   final Value<String> sessionId;
   final Value<String> itemId;
   final Value<String> upc;
   final Value<String> name;
   final Value<int> qty;
+  final Value<bool> isLotItem;
+  final Value<bool> isSerialItem;
+  final Value<String?> lotSerialData;
   const ScannedItemsCompanion({
     this.rowId = const Value.absent(),
     this.sessionId = const Value.absent(),
@@ -1892,6 +2135,9 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
     this.upc = const Value.absent(),
     this.name = const Value.absent(),
     this.qty = const Value.absent(),
+    this.isLotItem = const Value.absent(),
+    this.isSerialItem = const Value.absent(),
+    this.lotSerialData = const Value.absent(),
   });
   ScannedItemsCompanion.insert({
     this.rowId = const Value.absent(),
@@ -1900,18 +2146,24 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
     required String upc,
     required String name,
     required int qty,
+    this.isLotItem = const Value.absent(),
+    this.isSerialItem = const Value.absent(),
+    this.lotSerialData = const Value.absent(),
   }) : sessionId = Value(sessionId),
        itemId = Value(itemId),
        upc = Value(upc),
        name = Value(name),
        qty = Value(qty);
-  static Insertable<ScannedItem> custom({
+  static Insertable<DbScannedItem> custom({
     Expression<int>? rowId,
     Expression<String>? sessionId,
     Expression<String>? itemId,
     Expression<String>? upc,
     Expression<String>? name,
     Expression<int>? qty,
+    Expression<bool>? isLotItem,
+    Expression<bool>? isSerialItem,
+    Expression<String>? lotSerialData,
   }) {
     return RawValuesInsertable({
       if (rowId != null) 'row_id': rowId,
@@ -1920,6 +2172,9 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
       if (upc != null) 'upc': upc,
       if (name != null) 'name': name,
       if (qty != null) 'qty': qty,
+      if (isLotItem != null) 'is_lot_item': isLotItem,
+      if (isSerialItem != null) 'is_serial_item': isSerialItem,
+      if (lotSerialData != null) 'lot_serial_data': lotSerialData,
     });
   }
 
@@ -1930,6 +2185,9 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
     Value<String>? upc,
     Value<String>? name,
     Value<int>? qty,
+    Value<bool>? isLotItem,
+    Value<bool>? isSerialItem,
+    Value<String?>? lotSerialData,
   }) {
     return ScannedItemsCompanion(
       rowId: rowId ?? this.rowId,
@@ -1938,6 +2196,9 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
       upc: upc ?? this.upc,
       name: name ?? this.name,
       qty: qty ?? this.qty,
+      isLotItem: isLotItem ?? this.isLotItem,
+      isSerialItem: isSerialItem ?? this.isSerialItem,
+      lotSerialData: lotSerialData ?? this.lotSerialData,
     );
   }
 
@@ -1962,6 +2223,15 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
     if (qty.present) {
       map['qty'] = Variable<int>(qty.value);
     }
+    if (isLotItem.present) {
+      map['is_lot_item'] = Variable<bool>(isLotItem.value);
+    }
+    if (isSerialItem.present) {
+      map['is_serial_item'] = Variable<bool>(isSerialItem.value);
+    }
+    if (lotSerialData.present) {
+      map['lot_serial_data'] = Variable<String>(lotSerialData.value);
+    }
     return map;
   }
 
@@ -1973,7 +2243,10 @@ class ScannedItemsCompanion extends UpdateCompanion<ScannedItem> {
           ..write('itemId: $itemId, ')
           ..write('upc: $upc, ')
           ..write('name: $name, ')
-          ..write('qty: $qty')
+          ..write('qty: $qty, ')
+          ..write('isLotItem: $isLotItem, ')
+          ..write('isSerialItem: $isSerialItem, ')
+          ..write('lotSerialData: $lotSerialData')
           ..write(')'))
         .toString();
   }
@@ -2539,6 +2812,8 @@ typedef $$CatalogItemsTableCreateCompanionBuilder =
       required String locationId,
       required String name,
       required String upc,
+      Value<bool> isLotItem,
+      Value<bool> isSerialItem,
       Value<int> rowid,
     });
 typedef $$CatalogItemsTableUpdateCompanionBuilder =
@@ -2547,6 +2822,8 @@ typedef $$CatalogItemsTableUpdateCompanionBuilder =
       Value<String> locationId,
       Value<String> name,
       Value<String> upc,
+      Value<bool> isLotItem,
+      Value<bool> isSerialItem,
       Value<int> rowid,
     });
 
@@ -2576,6 +2853,16 @@ class $$CatalogItemsTableFilterComposer
 
   ColumnFilters<String> get upc => $composableBuilder(
     column: $table.upc,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isLotItem => $composableBuilder(
+    column: $table.isLotItem,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2608,6 +2895,16 @@ class $$CatalogItemsTableOrderingComposer
     column: $table.upc,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get isLotItem => $composableBuilder(
+    column: $table.isLotItem,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CatalogItemsTableAnnotationComposer
@@ -2632,6 +2929,14 @@ class $$CatalogItemsTableAnnotationComposer
 
   GeneratedColumn<String> get upc =>
       $composableBuilder(column: $table.upc, builder: (column) => column);
+
+  GeneratedColumn<bool> get isLotItem =>
+      $composableBuilder(column: $table.isLotItem, builder: (column) => column);
+
+  GeneratedColumn<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
+    builder: (column) => column,
+  );
 }
 
 class $$CatalogItemsTableTableManager
@@ -2669,12 +2974,16 @@ class $$CatalogItemsTableTableManager
                 Value<String> locationId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<String> upc = const Value.absent(),
+                Value<bool> isLotItem = const Value.absent(),
+                Value<bool> isSerialItem = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CatalogItemsCompanion(
                 id: id,
                 locationId: locationId,
                 name: name,
                 upc: upc,
+                isLotItem: isLotItem,
+                isSerialItem: isSerialItem,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2683,12 +2992,16 @@ class $$CatalogItemsTableTableManager
                 required String locationId,
                 required String name,
                 required String upc,
+                Value<bool> isLotItem = const Value.absent(),
+                Value<bool> isSerialItem = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CatalogItemsCompanion.insert(
                 id: id,
                 locationId: locationId,
                 name: name,
                 upc: upc,
+                isLotItem: isLotItem,
+                isSerialItem: isSerialItem,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -2839,17 +3152,17 @@ class $$CountSessionsTableTableManager
         RootTableManager<
           _$AppDatabase,
           $CountSessionsTable,
-          CountSession,
+          DbSession,
           $$CountSessionsTableFilterComposer,
           $$CountSessionsTableOrderingComposer,
           $$CountSessionsTableAnnotationComposer,
           $$CountSessionsTableCreateCompanionBuilder,
           $$CountSessionsTableUpdateCompanionBuilder,
           (
-            CountSession,
-            BaseReferences<_$AppDatabase, $CountSessionsTable, CountSession>,
+            DbSession,
+            BaseReferences<_$AppDatabase, $CountSessionsTable, DbSession>,
           ),
-          CountSession,
+          DbSession,
           PrefetchHooks Function()
         > {
   $$CountSessionsTableTableManager(_$AppDatabase db, $CountSessionsTable table)
@@ -2907,17 +3220,17 @@ typedef $$CountSessionsTableProcessedTableManager =
     ProcessedTableManager<
       _$AppDatabase,
       $CountSessionsTable,
-      CountSession,
+      DbSession,
       $$CountSessionsTableFilterComposer,
       $$CountSessionsTableOrderingComposer,
       $$CountSessionsTableAnnotationComposer,
       $$CountSessionsTableCreateCompanionBuilder,
       $$CountSessionsTableUpdateCompanionBuilder,
       (
-        CountSession,
-        BaseReferences<_$AppDatabase, $CountSessionsTable, CountSession>,
+        DbSession,
+        BaseReferences<_$AppDatabase, $CountSessionsTable, DbSession>,
       ),
-      CountSession,
+      DbSession,
       PrefetchHooks Function()
     >;
 typedef $$ScannedItemsTableCreateCompanionBuilder =
@@ -2928,6 +3241,9 @@ typedef $$ScannedItemsTableCreateCompanionBuilder =
       required String upc,
       required String name,
       required int qty,
+      Value<bool> isLotItem,
+      Value<bool> isSerialItem,
+      Value<String?> lotSerialData,
     });
 typedef $$ScannedItemsTableUpdateCompanionBuilder =
     ScannedItemsCompanion Function({
@@ -2937,6 +3253,9 @@ typedef $$ScannedItemsTableUpdateCompanionBuilder =
       Value<String> upc,
       Value<String> name,
       Value<int> qty,
+      Value<bool> isLotItem,
+      Value<bool> isSerialItem,
+      Value<String?> lotSerialData,
     });
 
 class $$ScannedItemsTableFilterComposer
@@ -2975,6 +3294,21 @@ class $$ScannedItemsTableFilterComposer
 
   ColumnFilters<int> get qty => $composableBuilder(
     column: $table.qty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isLotItem => $composableBuilder(
+    column: $table.isLotItem,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lotSerialData => $composableBuilder(
+    column: $table.lotSerialData,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3017,6 +3351,21 @@ class $$ScannedItemsTableOrderingComposer
     column: $table.qty,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get isLotItem => $composableBuilder(
+    column: $table.isLotItem,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lotSerialData => $composableBuilder(
+    column: $table.lotSerialData,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ScannedItemsTableAnnotationComposer
@@ -3045,6 +3394,19 @@ class $$ScannedItemsTableAnnotationComposer
 
   GeneratedColumn<int> get qty =>
       $composableBuilder(column: $table.qty, builder: (column) => column);
+
+  GeneratedColumn<bool> get isLotItem =>
+      $composableBuilder(column: $table.isLotItem, builder: (column) => column);
+
+  GeneratedColumn<bool> get isSerialItem => $composableBuilder(
+    column: $table.isSerialItem,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get lotSerialData => $composableBuilder(
+    column: $table.lotSerialData,
+    builder: (column) => column,
+  );
 }
 
 class $$ScannedItemsTableTableManager
@@ -3052,17 +3414,17 @@ class $$ScannedItemsTableTableManager
         RootTableManager<
           _$AppDatabase,
           $ScannedItemsTable,
-          ScannedItem,
+          DbScannedItem,
           $$ScannedItemsTableFilterComposer,
           $$ScannedItemsTableOrderingComposer,
           $$ScannedItemsTableAnnotationComposer,
           $$ScannedItemsTableCreateCompanionBuilder,
           $$ScannedItemsTableUpdateCompanionBuilder,
           (
-            ScannedItem,
-            BaseReferences<_$AppDatabase, $ScannedItemsTable, ScannedItem>,
+            DbScannedItem,
+            BaseReferences<_$AppDatabase, $ScannedItemsTable, DbScannedItem>,
           ),
-          ScannedItem,
+          DbScannedItem,
           PrefetchHooks Function()
         > {
   $$ScannedItemsTableTableManager(_$AppDatabase db, $ScannedItemsTable table)
@@ -3084,6 +3446,9 @@ class $$ScannedItemsTableTableManager
                 Value<String> upc = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> qty = const Value.absent(),
+                Value<bool> isLotItem = const Value.absent(),
+                Value<bool> isSerialItem = const Value.absent(),
+                Value<String?> lotSerialData = const Value.absent(),
               }) => ScannedItemsCompanion(
                 rowId: rowId,
                 sessionId: sessionId,
@@ -3091,6 +3456,9 @@ class $$ScannedItemsTableTableManager
                 upc: upc,
                 name: name,
                 qty: qty,
+                isLotItem: isLotItem,
+                isSerialItem: isSerialItem,
+                lotSerialData: lotSerialData,
               ),
           createCompanionCallback:
               ({
@@ -3100,6 +3468,9 @@ class $$ScannedItemsTableTableManager
                 required String upc,
                 required String name,
                 required int qty,
+                Value<bool> isLotItem = const Value.absent(),
+                Value<bool> isSerialItem = const Value.absent(),
+                Value<String?> lotSerialData = const Value.absent(),
               }) => ScannedItemsCompanion.insert(
                 rowId: rowId,
                 sessionId: sessionId,
@@ -3107,6 +3478,9 @@ class $$ScannedItemsTableTableManager
                 upc: upc,
                 name: name,
                 qty: qty,
+                isLotItem: isLotItem,
+                isSerialItem: isSerialItem,
+                lotSerialData: lotSerialData,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -3120,17 +3494,17 @@ typedef $$ScannedItemsTableProcessedTableManager =
     ProcessedTableManager<
       _$AppDatabase,
       $ScannedItemsTable,
-      ScannedItem,
+      DbScannedItem,
       $$ScannedItemsTableFilterComposer,
       $$ScannedItemsTableOrderingComposer,
       $$ScannedItemsTableAnnotationComposer,
       $$ScannedItemsTableCreateCompanionBuilder,
       $$ScannedItemsTableUpdateCompanionBuilder,
       (
-        ScannedItem,
-        BaseReferences<_$AppDatabase, $ScannedItemsTable, ScannedItem>,
+        DbScannedItem,
+        BaseReferences<_$AppDatabase, $ScannedItemsTable, DbScannedItem>,
       ),
-      ScannedItem,
+      DbScannedItem,
       PrefetchHooks Function()
     >;
 

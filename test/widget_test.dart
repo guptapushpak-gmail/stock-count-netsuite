@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:stock_count_netsuite/main.dart';
+import 'package:netstore_next/main.dart';
 
 void main() {
   testWidgets('app boots', (WidgetTester tester) async {
