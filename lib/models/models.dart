@@ -74,6 +74,9 @@ class CountSession {
   final String locationName;
   final String status; // in_progress/completed
   final DateTime createdAt;
+  final String memo;
+  final int skuCount;    // distinct SKUs scanned
+  final int totalQty;    // sum of all quantities
 
   const CountSession({
     required this.id,
@@ -81,7 +84,21 @@ class CountSession {
     required this.locationName,
     required this.status,
     required this.createdAt,
+    this.memo = '',
+    this.skuCount = 0,
+    this.totalQty = 0,
   });
+
+  CountSession copyWith({int? skuCount, int? totalQty, String? status}) => CountSession(
+        id: id,
+        locationId: locationId,
+        locationName: locationName,
+        status: status ?? this.status,
+        createdAt: createdAt,
+        memo: memo,
+        skuCount: skuCount ?? this.skuCount,
+        totalQty: totalQty ?? this.totalQty,
+      );
 }
 
 class LotSerialAssignment {

@@ -1381,6 +1381,16 @@ class $CountSessionsTable extends CountSessions
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _memoMeta = const VerificationMeta('memo');
+  @override
+  late final GeneratedColumn<String> memo = GeneratedColumn<String>(
+    'memo',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1388,6 +1398,7 @@ class $CountSessionsTable extends CountSessions
     locationName,
     status,
     createdAt,
+    memo,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1441,6 +1452,12 @@ class $CountSessionsTable extends CountSessions
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('memo')) {
+      context.handle(
+        _memoMeta,
+        memo.isAcceptableOrUnknown(data['memo']!, _memoMeta),
+      );
+    }
     return context;
   }
 
@@ -1470,6 +1487,10 @@ class $CountSessionsTable extends CountSessions
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      memo: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}memo'],
+      )!,
     );
   }
 
@@ -1485,12 +1506,14 @@ class DbSession extends DataClass implements Insertable<DbSession> {
   final String locationName;
   final String status;
   final DateTime createdAt;
+  final String memo;
   const DbSession({
     required this.id,
     required this.locationId,
     required this.locationName,
     required this.status,
     required this.createdAt,
+    required this.memo,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1500,6 +1523,7 @@ class DbSession extends DataClass implements Insertable<DbSession> {
     map['location_name'] = Variable<String>(locationName);
     map['status'] = Variable<String>(status);
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['memo'] = Variable<String>(memo);
     return map;
   }
 
@@ -1510,6 +1534,7 @@ class DbSession extends DataClass implements Insertable<DbSession> {
       locationName: Value(locationName),
       status: Value(status),
       createdAt: Value(createdAt),
+      memo: Value(memo),
     );
   }
 
@@ -1524,6 +1549,7 @@ class DbSession extends DataClass implements Insertable<DbSession> {
       locationName: serializer.fromJson<String>(json['locationName']),
       status: serializer.fromJson<String>(json['status']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      memo: serializer.fromJson<String>(json['memo']),
     );
   }
   @override
@@ -1535,6 +1561,7 @@ class DbSession extends DataClass implements Insertable<DbSession> {
       'locationName': serializer.toJson<String>(locationName),
       'status': serializer.toJson<String>(status),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'memo': serializer.toJson<String>(memo),
     };
   }
 
@@ -1544,12 +1571,14 @@ class DbSession extends DataClass implements Insertable<DbSession> {
     String? locationName,
     String? status,
     DateTime? createdAt,
+    String? memo,
   }) => DbSession(
     id: id ?? this.id,
     locationId: locationId ?? this.locationId,
     locationName: locationName ?? this.locationName,
     status: status ?? this.status,
     createdAt: createdAt ?? this.createdAt,
+    memo: memo ?? this.memo,
   );
   DbSession copyWithCompanion(CountSessionsCompanion data) {
     return DbSession(
@@ -1562,6 +1591,7 @@ class DbSession extends DataClass implements Insertable<DbSession> {
           : this.locationName,
       status: data.status.present ? data.status.value : this.status,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      memo: data.memo.present ? data.memo.value : this.memo,
     );
   }
 
@@ -1572,14 +1602,15 @@ class DbSession extends DataClass implements Insertable<DbSession> {
           ..write('locationId: $locationId, ')
           ..write('locationName: $locationName, ')
           ..write('status: $status, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('memo: $memo')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode =>
-      Object.hash(id, locationId, locationName, status, createdAt);
+      Object.hash(id, locationId, locationName, status, createdAt, memo);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1588,7 +1619,8 @@ class DbSession extends DataClass implements Insertable<DbSession> {
           other.locationId == this.locationId &&
           other.locationName == this.locationName &&
           other.status == this.status &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.memo == this.memo);
 }
 
 class CountSessionsCompanion extends UpdateCompanion<DbSession> {
@@ -1597,6 +1629,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
   final Value<String> locationName;
   final Value<String> status;
   final Value<DateTime> createdAt;
+  final Value<String> memo;
   final Value<int> rowid;
   const CountSessionsCompanion({
     this.id = const Value.absent(),
@@ -1604,6 +1637,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
     this.locationName = const Value.absent(),
     this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.memo = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CountSessionsCompanion.insert({
@@ -1612,6 +1646,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
     required String locationName,
     required String status,
     required DateTime createdAt,
+    this.memo = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        locationId = Value(locationId),
@@ -1624,6 +1659,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
     Expression<String>? locationName,
     Expression<String>? status,
     Expression<DateTime>? createdAt,
+    Expression<String>? memo,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1632,6 +1668,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
       if (locationName != null) 'location_name': locationName,
       if (status != null) 'status': status,
       if (createdAt != null) 'created_at': createdAt,
+      if (memo != null) 'memo': memo,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1642,6 +1679,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
     Value<String>? locationName,
     Value<String>? status,
     Value<DateTime>? createdAt,
+    Value<String>? memo,
     Value<int>? rowid,
   }) {
     return CountSessionsCompanion(
@@ -1650,6 +1688,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
       locationName: locationName ?? this.locationName,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      memo: memo ?? this.memo,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1672,6 +1711,9 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (memo.present) {
+      map['memo'] = Variable<String>(memo.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1686,6 +1728,7 @@ class CountSessionsCompanion extends UpdateCompanion<DbSession> {
           ..write('locationName: $locationName, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
+          ..write('memo: $memo, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3036,6 +3079,7 @@ typedef $$CountSessionsTableCreateCompanionBuilder =
       required String locationName,
       required String status,
       required DateTime createdAt,
+      Value<String> memo,
       Value<int> rowid,
     });
 typedef $$CountSessionsTableUpdateCompanionBuilder =
@@ -3045,6 +3089,7 @@ typedef $$CountSessionsTableUpdateCompanionBuilder =
       Value<String> locationName,
       Value<String> status,
       Value<DateTime> createdAt,
+      Value<String> memo,
       Value<int> rowid,
     });
 
@@ -3079,6 +3124,11 @@ class $$CountSessionsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get memo => $composableBuilder(
+    column: $table.memo,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3116,6 +3166,11 @@ class $$CountSessionsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get memo => $composableBuilder(
+    column: $table.memo,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CountSessionsTableAnnotationComposer
@@ -3145,6 +3200,9 @@ class $$CountSessionsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get memo =>
+      $composableBuilder(column: $table.memo, builder: (column) => column);
 }
 
 class $$CountSessionsTableTableManager
@@ -3183,6 +3241,7 @@ class $$CountSessionsTableTableManager
                 Value<String> locationName = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<String> memo = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CountSessionsCompanion(
                 id: id,
@@ -3190,6 +3249,7 @@ class $$CountSessionsTableTableManager
                 locationName: locationName,
                 status: status,
                 createdAt: createdAt,
+                memo: memo,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3199,6 +3259,7 @@ class $$CountSessionsTableTableManager
                 required String locationName,
                 required String status,
                 required DateTime createdAt,
+                Value<String> memo = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CountSessionsCompanion.insert(
                 id: id,
@@ -3206,6 +3267,7 @@ class $$CountSessionsTableTableManager
                 locationName: locationName,
                 status: status,
                 createdAt: createdAt,
+                memo: memo,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

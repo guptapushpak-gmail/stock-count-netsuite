@@ -41,6 +41,10 @@ class AppState extends ChangeNotifier {
   String? currentRoleName;
   String? currentUserEmail;
 
+  // Values captured when the user starts a new count (used at submit time)
+  String pendingAdjustmentAccountId = '';
+  String pendingMemo = 'Stock count adjustment';
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   String? _extractAccountFromJwt(String jwt) {
@@ -129,17 +133,22 @@ class AppState extends ChangeNotifier {
         }
       }
 
-      // Load sessions
+      // Load sessions + per-session item counts
       final dbSessions = await db.getAllSessions();
-      sessions = dbSessions
-          .map((r) => CountSession(
-                id: r.id,
-                locationId: r.locationId,
-                locationName: r.locationName,
-                status: r.status,
-                createdAt: r.createdAt,
-              ))
-          .toList();
+      final sessionCounts = await db.getAllSessionCounts();
+      sessions = dbSessions.map((r) {
+        final counts = sessionCounts[r.id];
+        return CountSession(
+          id: r.id,
+          locationId: r.locationId,
+          locationName: r.locationName,
+          status: r.status,
+          createdAt: r.createdAt,
+          memo: r.memo,
+          skuCount: counts?.skuCount ?? 0,
+          totalQty: counts?.totalQty ?? 0,
+        );
+      }).toList();
 
       // Restore active session (last in_progress)
       for (final s in sessions) {
@@ -557,6 +566,34 @@ class AppState extends ChangeNotifier {
 
   // ── Sessions ──────────────────────────────────────────────────────────────
 
+  Future<void> deleteSession(String sessionId) async {
+    await db.deleteSession(sessionId);
+    sessions.removeWhere((s) => s.id == sessionId);
+    if (activeSessionId == sessionId) {
+      activeSessionId = null;
+      scannedItems.clear();
+    }
+    notifyListeners();
+  }
+
+  Future<void> resumeSession(String sessionId) async {
+    if (activeSessionId == sessionId) return; // already active
+    activeSessionId = sessionId;
+    final dbScanned = await db.getScannedItems(sessionId);
+    scannedItems = dbScanned
+        .map((r) => ScannedItem(
+              itemId: r.itemId,
+              upc: r.upc,
+              name: r.name,
+              qty: r.qty,
+              isLotItem: r.isLotItem,
+              isSerialItem: r.isSerialItem,
+              lotSerialAssignments: ScannedItem.decodeLotSerial(r.lotSerialData),
+            ))
+        .toList();
+    notifyListeners();
+  }
+
   void addSession(CountSession session) {
     sessions.insert(0, session);
     activeSessionId = session.id;
@@ -567,8 +604,20 @@ class AppState extends ChangeNotifier {
       locationName: session.locationName,
       status: session.status,
       createdAt: session.createdAt,
+      memo: Value(session.memo),
     ));
     notifyListeners();
+  }
+
+  // ── Session count helpers ─────────────────────────────────────────────────
+
+  void _syncActiveSessionCounts() {
+    if (activeSessionId == null) return;
+    final idx = sessions.indexWhere((s) => s.id == activeSessionId);
+    if (idx < 0) return;
+    final skuCount = scannedItems.length;
+    final totalQty = scannedItems.fold(0, (sum, i) => sum + i.qty);
+    sessions[idx] = sessions[idx].copyWith(skuCount: skuCount, totalQty: totalQty);
   }
 
   // ── Scanning ──────────────────────────────────────────────────────────────
@@ -624,6 +673,7 @@ class AppState extends ChangeNotifier {
         lotSerialData: ScannedItem.encodeLotSerial(si.lotSerialAssignments),
       );
     }
+    _syncActiveSessionCounts();
     notifyListeners();
   }
 
@@ -686,6 +736,7 @@ class AppState extends ChangeNotifier {
         lotSerialData: ScannedItem.encodeLotSerial(si.lotSerialAssignments),
       );
     }
+    _syncActiveSessionCounts();
     notifyListeners();
   }
 
@@ -709,6 +760,7 @@ class AppState extends ChangeNotifier {
         lotSerialData: ScannedItem.encodeLotSerial(assignments),
       );
     }
+    _syncActiveSessionCounts();
     notifyListeners();
   }
 
@@ -727,6 +779,7 @@ class AppState extends ChangeNotifier {
         qty: newQty,
       );
     }
+    _syncActiveSessionCounts();
     notifyListeners();
   }
 
@@ -753,6 +806,7 @@ class AppState extends ChangeNotifier {
         );
       }
     }
+    _syncActiveSessionCounts();
     notifyListeners();
   }
 
@@ -967,13 +1021,7 @@ class AppState extends ChangeNotifier {
         await db.clearScannedItems(activeSessionId!);
         for (var i = 0; i < sessions.length; i++) {
           if (sessions[i].id == activeSessionId) {
-            sessions[i] = CountSession(
-              id: sessions[i].id,
-              locationId: sessions[i].locationId,
-              locationName: sessions[i].locationName,
-              status: 'completed',
-              createdAt: sessions[i].createdAt,
-            );
+            sessions[i] = sessions[i].copyWith(status: 'completed');
             break;
           }
         }

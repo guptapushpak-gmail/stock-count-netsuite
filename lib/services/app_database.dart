@@ -57,6 +57,7 @@ class CountSessions extends Table {
   TextColumn get locationName => text()();
   TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime()();
+  TextColumn get memo => text().withDefault(const Constant(''))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -89,7 +90,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -105,6 +106,10 @@ class AppDatabase extends _$AppDatabase {
             'ALTER TABLE scanned_items ADD COLUMN is_serial_item INTEGER NOT NULL DEFAULT 0');
         await customStatement(
             'ALTER TABLE scanned_items ADD COLUMN lot_serial_data TEXT');
+      }
+      if (from < 3) {
+        await customStatement(
+            "ALTER TABLE count_sessions ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
       }
     },
   );
@@ -199,6 +204,21 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Scanned items ─────────────────────────────────────────────────────────
 
+  /// Returns {sessionId: (skuCount, totalQty)} for all sessions.
+  Future<Map<String, ({int skuCount, int totalQty})>> getAllSessionCounts() async {
+    final rows = await customSelect(
+      'SELECT session_id, COUNT(*) AS sku_count, SUM(qty) AS total_qty '
+      'FROM scanned_items GROUP BY session_id',
+    ).get();
+    return {
+      for (final r in rows)
+        r.read<String>('session_id'): (
+          skuCount: r.read<int>('sku_count'),
+          totalQty: r.read<int>('total_qty'),
+        )
+    };
+  }
+
   Future<List<DbScannedItem>> getScannedItems(String sessionId) =>
       (select(scannedItems)..where((t) => t.sessionId.equals(sessionId))).get();
 
@@ -245,4 +265,9 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearScannedItems(String sessionId) =>
       (delete(scannedItems)..where((t) => t.sessionId.equals(sessionId))).go();
+
+  Future<void> deleteSession(String sessionId) => transaction(() async {
+        await (delete(scannedItems)..where((t) => t.sessionId.equals(sessionId))).go();
+        await (delete(countSessions)..where((t) => t.id.equals(sessionId))).go();
+      });
 }

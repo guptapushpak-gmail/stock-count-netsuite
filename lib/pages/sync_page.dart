@@ -287,9 +287,9 @@ class _StepTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          SizedBox(width: 36, child: leadingIcon),
+          SizedBox(width: 36, height: 22, child: Center(child: leadingIcon)),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

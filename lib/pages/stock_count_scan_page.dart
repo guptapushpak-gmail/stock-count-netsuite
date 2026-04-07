@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/app_state.dart';
+import 'submit_flow.dart';
 
 class StockCountScanPage extends StatefulWidget {
   const StockCountScanPage({super.key});
@@ -158,128 +159,8 @@ class _StockCountScanPageState extends State<StockCountScanPage> {
   }
 
   Future<void> _submitFlow(BuildContext context) async {
-    final app = context.read<AppState>();
-    final accountOptions = app.adjustmentAccounts;
-    final firstAccount = accountOptions.isNotEmpty ? accountOptions.first.id : '';
-    final accountCtrl = TextEditingController(text: firstAccount);
-    final memoCtrl = TextEditingController(text: 'Stock count adjustment');
-    var selected = firstAccount.isEmpty ? 'custom' : firstAccount;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('Submit Adjustment'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: selected,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Adjustment Account *'),
-                  items: [
-                    ...accountOptions.map((a) => DropdownMenuItem(
-                          value: a.id,
-                          child: Text(a.name, overflow: TextOverflow.ellipsis, maxLines: 1),
-                        )),
-                    const DropdownMenuItem(value: 'custom', child: Text('Enter manually')),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setLocal(() => selected = v);
-                    accountCtrl.text = v == 'custom' ? '' : v;
-                  },
-                ),
-                if (selected == 'custom') ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                      controller: accountCtrl,
-                      decoration: const InputDecoration(labelText: 'Account ID *')),
-                ],
-                const SizedBox(height: 8),
-                TextField(
-                    controller: memoCtrl,
-                    decoration: const InputDecoration(labelText: 'Memo')),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Continue')),
-          ],
-        ),
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-    final accountId = accountCtrl.text.trim();
-    if (accountId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Adjustment account is required')),
-      );
-      return;
-    }
-
-    final really = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirm Submission'),
-        content: Text(
-            'Submit inventory adjustment?\n\nItems: ${app.scannedItems.length}\nAccount: $accountId'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Submit')),
-        ],
-      ),
-    );
-
-    if (really != true || !context.mounted) return;
-
-    try {
-      final id = await context.read<AppState>().submitInventoryAdjustment(
-            adjustmentAccountId: accountId,
-            subsidiaryId: app.selectedLocation?.subsidiaryId,
-            memo: memoCtrl.text.trim(),
-          );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Adjustment created: $id'),
-              backgroundColor: Colors.green.shade700),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (!context.mounted) return;
-      if (AppState.isAuthError(e) || e.toString().toLowerCase().contains('session expired')) {
-        Navigator.of(context).popUntil((r) => r.isFirst);
-        return;
-      }
-      if (context.mounted) {
-        final msg = e.toString().replaceFirst('Exception: ', '');
-        showDialog<void>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Submission Failed'),
-            content: SingleChildScrollView(child: Text(msg)),
-            actions: [
-              FilledButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK')),
-            ],
-          ),
-        );
-      }
-    }
+    final submitted = await showSubmitFlow(context);
+    if (submitted && context.mounted) Navigator.pop(context);
   }
 
   @override
