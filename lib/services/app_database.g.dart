@@ -61,6 +61,33 @@ class $AuthStoreTable extends AuthStore
         type: DriftSqlType.blob,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _userNameMeta = const VerificationMeta('userName');
+  @override
+  late final GeneratedColumn<String> userName = GeneratedColumn<String>(
+    'user_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _userEmailMeta = const VerificationMeta('userEmail');
+  @override
+  late final GeneratedColumn<String> userEmail = GeneratedColumn<String>(
+    'user_email',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _roleNameMeta = const VerificationMeta('roleName');
+  @override
+  late final GeneratedColumn<String> roleName = GeneratedColumn<String>(
+    'role_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -68,6 +95,9 @@ class $AuthStoreTable extends AuthStore
     accountId,
     selectedLocationId,
     companyLogo,
+    userName,
+    userEmail,
+    roleName,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -114,6 +144,24 @@ class $AuthStoreTable extends AuthStore
         ),
       );
     }
+    if (data.containsKey('user_name')) {
+      context.handle(
+        _userNameMeta,
+        userName.isAcceptableOrUnknown(data['user_name']!, _userNameMeta),
+      );
+    }
+    if (data.containsKey('user_email')) {
+      context.handle(
+        _userEmailMeta,
+        userEmail.isAcceptableOrUnknown(data['user_email']!, _userEmailMeta),
+      );
+    }
+    if (data.containsKey('role_name')) {
+      context.handle(
+        _roleNameMeta,
+        roleName.isAcceptableOrUnknown(data['role_name']!, _roleNameMeta),
+      );
+    }
     return context;
   }
 
@@ -143,6 +191,18 @@ class $AuthStoreTable extends AuthStore
         DriftSqlType.blob,
         data['${effectivePrefix}company_logo'],
       ),
+      userName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_name'],
+      ),
+      userEmail: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_email'],
+      ),
+      roleName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}role_name'],
+      ),
     );
   }
 
@@ -158,12 +218,18 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
   final String? accountId;
   final String? selectedLocationId;
   final Uint8List? companyLogo;
+  final String? userName;
+  final String? userEmail;
+  final String? roleName;
   const AuthStoreData({
     required this.id,
     this.token,
     this.accountId,
     this.selectedLocationId,
     this.companyLogo,
+    this.userName,
+    this.userEmail,
+    this.roleName,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -180,6 +246,15 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
     }
     if (!nullToAbsent || companyLogo != null) {
       map['company_logo'] = Variable<Uint8List>(companyLogo);
+    }
+    if (!nullToAbsent || userName != null) {
+      map['user_name'] = Variable<String>(userName);
+    }
+    if (!nullToAbsent || userEmail != null) {
+      map['user_email'] = Variable<String>(userEmail);
+    }
+    if (!nullToAbsent || roleName != null) {
+      map['role_name'] = Variable<String>(roleName);
     }
     return map;
   }
@@ -199,6 +274,15 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
       companyLogo: companyLogo == null && nullToAbsent
           ? const Value.absent()
           : Value(companyLogo),
+      userName: userName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(userName),
+      userEmail: userEmail == null && nullToAbsent
+          ? const Value.absent()
+          : Value(userEmail),
+      roleName: roleName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(roleName),
     );
   }
 
@@ -215,6 +299,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
         json['selectedLocationId'],
       ),
       companyLogo: serializer.fromJson<Uint8List?>(json['companyLogo']),
+      userName: serializer.fromJson<String?>(json['userName']),
+      userEmail: serializer.fromJson<String?>(json['userEmail']),
+      roleName: serializer.fromJson<String?>(json['roleName']),
     );
   }
   @override
@@ -226,6 +313,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
       'accountId': serializer.toJson<String?>(accountId),
       'selectedLocationId': serializer.toJson<String?>(selectedLocationId),
       'companyLogo': serializer.toJson<Uint8List?>(companyLogo),
+      'userName': serializer.toJson<String?>(userName),
+      'userEmail': serializer.toJson<String?>(userEmail),
+      'roleName': serializer.toJson<String?>(roleName),
     };
   }
 
@@ -235,6 +325,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
     Value<String?> accountId = const Value.absent(),
     Value<String?> selectedLocationId = const Value.absent(),
     Value<Uint8List?> companyLogo = const Value.absent(),
+    Value<String?> userName = const Value.absent(),
+    Value<String?> userEmail = const Value.absent(),
+    Value<String?> roleName = const Value.absent(),
   }) => AuthStoreData(
     id: id ?? this.id,
     token: token.present ? token.value : this.token,
@@ -243,6 +336,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
         ? selectedLocationId.value
         : this.selectedLocationId,
     companyLogo: companyLogo.present ? companyLogo.value : this.companyLogo,
+    userName: userName.present ? userName.value : this.userName,
+    userEmail: userEmail.present ? userEmail.value : this.userEmail,
+    roleName: roleName.present ? roleName.value : this.roleName,
   );
   AuthStoreData copyWithCompanion(AuthStoreCompanion data) {
     return AuthStoreData(
@@ -255,6 +351,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
       companyLogo: data.companyLogo.present
           ? data.companyLogo.value
           : this.companyLogo,
+      userName: data.userName.present ? data.userName.value : this.userName,
+      userEmail: data.userEmail.present ? data.userEmail.value : this.userEmail,
+      roleName: data.roleName.present ? data.roleName.value : this.roleName,
     );
   }
 
@@ -265,7 +364,10 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
           ..write('token: $token, ')
           ..write('accountId: $accountId, ')
           ..write('selectedLocationId: $selectedLocationId, ')
-          ..write('companyLogo: $companyLogo')
+          ..write('companyLogo: $companyLogo, ')
+          ..write('userName: $userName, ')
+          ..write('userEmail: $userEmail, ')
+          ..write('roleName: $roleName')
           ..write(')'))
         .toString();
   }
@@ -277,6 +379,9 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
     accountId,
     selectedLocationId,
     $driftBlobEquality.hash(companyLogo),
+    userName,
+    userEmail,
+    roleName,
   );
   @override
   bool operator ==(Object other) =>
@@ -286,7 +391,10 @@ class AuthStoreData extends DataClass implements Insertable<AuthStoreData> {
           other.token == this.token &&
           other.accountId == this.accountId &&
           other.selectedLocationId == this.selectedLocationId &&
-          $driftBlobEquality.equals(other.companyLogo, this.companyLogo));
+          $driftBlobEquality.equals(other.companyLogo, this.companyLogo) &&
+          other.userName == this.userName &&
+          other.userEmail == this.userEmail &&
+          other.roleName == this.roleName);
 }
 
 class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
@@ -295,12 +403,18 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
   final Value<String?> accountId;
   final Value<String?> selectedLocationId;
   final Value<Uint8List?> companyLogo;
+  final Value<String?> userName;
+  final Value<String?> userEmail;
+  final Value<String?> roleName;
   const AuthStoreCompanion({
     this.id = const Value.absent(),
     this.token = const Value.absent(),
     this.accountId = const Value.absent(),
     this.selectedLocationId = const Value.absent(),
     this.companyLogo = const Value.absent(),
+    this.userName = const Value.absent(),
+    this.userEmail = const Value.absent(),
+    this.roleName = const Value.absent(),
   });
   AuthStoreCompanion.insert({
     this.id = const Value.absent(),
@@ -308,6 +422,9 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
     this.accountId = const Value.absent(),
     this.selectedLocationId = const Value.absent(),
     this.companyLogo = const Value.absent(),
+    this.userName = const Value.absent(),
+    this.userEmail = const Value.absent(),
+    this.roleName = const Value.absent(),
   });
   static Insertable<AuthStoreData> custom({
     Expression<int>? id,
@@ -315,6 +432,9 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
     Expression<String>? accountId,
     Expression<String>? selectedLocationId,
     Expression<Uint8List>? companyLogo,
+    Expression<String>? userName,
+    Expression<String>? userEmail,
+    Expression<String>? roleName,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -323,6 +443,9 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
       if (selectedLocationId != null)
         'selected_location_id': selectedLocationId,
       if (companyLogo != null) 'company_logo': companyLogo,
+      if (userName != null) 'user_name': userName,
+      if (userEmail != null) 'user_email': userEmail,
+      if (roleName != null) 'role_name': roleName,
     });
   }
 
@@ -332,6 +455,9 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
     Value<String?>? accountId,
     Value<String?>? selectedLocationId,
     Value<Uint8List?>? companyLogo,
+    Value<String?>? userName,
+    Value<String?>? userEmail,
+    Value<String?>? roleName,
   }) {
     return AuthStoreCompanion(
       id: id ?? this.id,
@@ -339,6 +465,9 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
       accountId: accountId ?? this.accountId,
       selectedLocationId: selectedLocationId ?? this.selectedLocationId,
       companyLogo: companyLogo ?? this.companyLogo,
+      userName: userName ?? this.userName,
+      userEmail: userEmail ?? this.userEmail,
+      roleName: roleName ?? this.roleName,
     );
   }
 
@@ -360,6 +489,15 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
     if (companyLogo.present) {
       map['company_logo'] = Variable<Uint8List>(companyLogo.value);
     }
+    if (userName.present) {
+      map['user_name'] = Variable<String>(userName.value);
+    }
+    if (userEmail.present) {
+      map['user_email'] = Variable<String>(userEmail.value);
+    }
+    if (roleName.present) {
+      map['role_name'] = Variable<String>(roleName.value);
+    }
     return map;
   }
 
@@ -370,7 +508,10 @@ class AuthStoreCompanion extends UpdateCompanion<AuthStoreData> {
           ..write('token: $token, ')
           ..write('accountId: $accountId, ')
           ..write('selectedLocationId: $selectedLocationId, ')
-          ..write('companyLogo: $companyLogo')
+          ..write('companyLogo: $companyLogo, ')
+          ..write('userName: $userName, ')
+          ..write('userEmail: $userEmail, ')
+          ..write('roleName: $roleName')
           ..write(')'))
         .toString();
   }
@@ -2326,6 +2467,9 @@ typedef $$AuthStoreTableCreateCompanionBuilder =
       Value<String?> accountId,
       Value<String?> selectedLocationId,
       Value<Uint8List?> companyLogo,
+      Value<String?> userName,
+      Value<String?> userEmail,
+      Value<String?> roleName,
     });
 typedef $$AuthStoreTableUpdateCompanionBuilder =
     AuthStoreCompanion Function({
@@ -2334,6 +2478,9 @@ typedef $$AuthStoreTableUpdateCompanionBuilder =
       Value<String?> accountId,
       Value<String?> selectedLocationId,
       Value<Uint8List?> companyLogo,
+      Value<String?> userName,
+      Value<String?> userEmail,
+      Value<String?> roleName,
     });
 
 class $$AuthStoreTableFilterComposer
@@ -2367,6 +2514,21 @@ class $$AuthStoreTableFilterComposer
 
   ColumnFilters<Uint8List> get companyLogo => $composableBuilder(
     column: $table.companyLogo,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userName => $composableBuilder(
+    column: $table.userName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userEmail => $composableBuilder(
+    column: $table.userEmail,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get roleName => $composableBuilder(
+    column: $table.roleName,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2404,6 +2566,21 @@ class $$AuthStoreTableOrderingComposer
     column: $table.companyLogo,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get userName => $composableBuilder(
+    column: $table.userName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userEmail => $composableBuilder(
+    column: $table.userEmail,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get roleName => $composableBuilder(
+    column: $table.roleName,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AuthStoreTableAnnotationComposer
@@ -2433,6 +2610,15 @@ class $$AuthStoreTableAnnotationComposer
     column: $table.companyLogo,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get userName =>
+      $composableBuilder(column: $table.userName, builder: (column) => column);
+
+  GeneratedColumn<String> get userEmail =>
+      $composableBuilder(column: $table.userEmail, builder: (column) => column);
+
+  GeneratedColumn<String> get roleName =>
+      $composableBuilder(column: $table.roleName, builder: (column) => column);
 }
 
 class $$AuthStoreTableTableManager
@@ -2471,12 +2657,18 @@ class $$AuthStoreTableTableManager
                 Value<String?> accountId = const Value.absent(),
                 Value<String?> selectedLocationId = const Value.absent(),
                 Value<Uint8List?> companyLogo = const Value.absent(),
+                Value<String?> userName = const Value.absent(),
+                Value<String?> userEmail = const Value.absent(),
+                Value<String?> roleName = const Value.absent(),
               }) => AuthStoreCompanion(
                 id: id,
                 token: token,
                 accountId: accountId,
                 selectedLocationId: selectedLocationId,
                 companyLogo: companyLogo,
+                userName: userName,
+                userEmail: userEmail,
+                roleName: roleName,
               ),
           createCompanionCallback:
               ({
@@ -2485,12 +2677,18 @@ class $$AuthStoreTableTableManager
                 Value<String?> accountId = const Value.absent(),
                 Value<String?> selectedLocationId = const Value.absent(),
                 Value<Uint8List?> companyLogo = const Value.absent(),
+                Value<String?> userName = const Value.absent(),
+                Value<String?> userEmail = const Value.absent(),
+                Value<String?> roleName = const Value.absent(),
               }) => AuthStoreCompanion.insert(
                 id: id,
                 token: token,
                 accountId: accountId,
                 selectedLocationId: selectedLocationId,
                 companyLogo: companyLogo,
+                userName: userName,
+                userEmail: userEmail,
+                roleName: roleName,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
