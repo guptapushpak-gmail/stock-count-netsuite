@@ -89,6 +89,10 @@ class AppState extends ChangeNotifier {
         accountId!.isNotEmpty;
     companyLogo = auth?.companyLogo;
 
+    currentUserName = auth?.userName;
+    currentUserEmail = auth?.userEmail;
+    currentRoleName = auth?.roleName;
+
     debugPrint('[BOOT] token=${token != null ? 'present' : 'null'}, accountId=$accountId, authenticated=$authenticated');
 
     if (authenticated) {
@@ -395,6 +399,7 @@ class AppState extends ChangeNotifier {
           currentUserName = info.name;
           currentRoleName = info.roleName;
           currentUserEmail = info.email;
+          db.saveUserInfo(userName: info.name, userEmail: info.email, roleName: info.roleName);
           notifyListeners();
         }).catchError((e) { debugPrint('[AUTH] user info fetch failed: $e'); });
       }

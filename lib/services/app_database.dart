@@ -15,6 +15,9 @@ class AuthStore extends Table {
   TextColumn get accountId => text().nullable()();
   TextColumn get selectedLocationId => text().nullable()();
   BlobColumn get companyLogo => blob().nullable()();
+  TextColumn get userName => text().nullable()();
+  TextColumn get userEmail => text().nullable()();
+  TextColumn get roleName => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -90,7 +93,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -110,6 +113,11 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         await customStatement(
             "ALTER TABLE count_sessions ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
+      }
+      if (from < 4) {
+        await customStatement('ALTER TABLE auth_store ADD COLUMN user_name TEXT');
+        await customStatement('ALTER TABLE auth_store ADD COLUMN user_email TEXT');
+        await customStatement('ALTER TABLE auth_store ADD COLUMN role_name TEXT');
       }
     },
   );
@@ -147,6 +155,14 @@ class AppDatabase extends _$AppDatabase {
       companyLogo: Value(logo),
     ));
   }
+
+  Future<void> saveUserInfo({String? userName, String? userEmail, String? roleName}) =>
+      into(authStore).insertOnConflictUpdate(AuthStoreCompanion(
+        id: const Value(1),
+        userName: Value(userName),
+        userEmail: Value(userEmail),
+        roleName: Value(roleName),
+      ));
 
   Future<void> clearAuth() => delete(authStore).go();
 
