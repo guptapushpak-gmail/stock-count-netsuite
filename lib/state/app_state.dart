@@ -4,9 +4,8 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
-import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
-
 import '../models/models.dart';
+import '../pages/netsuite_auth_webview.dart';
 import '../services/app_database.dart';
 import '../services/netsuite_api.dart';
 
@@ -25,6 +24,7 @@ class AppState extends ChangeNotifier {
   bool authenticated = false;
   bool loading = false;
   bool submitting = false;
+  bool needsReAuth = false;
   String? error;
 
   Uint8List? companyLogo;
@@ -67,7 +67,9 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  String _randomState([int bytes = 24]) {
+  String _randomState([int bytes = 24]) => generateRandomState(bytes);
+
+  static String generateRandomState([int bytes = 24]) {
     final rand = Random.secure();
     final data = List<int>.generate(bytes, (_) => rand.nextInt(256));
     return base64UrlEncode(data).replaceAll('=', '');
@@ -286,8 +288,7 @@ class AppState extends ChangeNotifier {
 
   // ── Login ─────────────────────────────────────────────────────────────────
 
-  Future<void> loginWithNetSuite() async {
-    loading = true;
+  Future<void> loginWithNetSuite(BuildContext context) async {
     error = null;
     notifyListeners();
 
@@ -303,11 +304,17 @@ class AppState extends ChangeNotifier {
       final authorizeUrl = cfg.buildAuthorizeUrl(state: oauthState);
       debugPrint('[AUTH] Authorize URL: $authorizeUrl');
 
-      final result = await FlutterWebAuth2.authenticate(
-        url: authorizeUrl,
-        callbackUrlScheme: callbackUrlScheme,
-        options: const FlutterWebAuth2Options(preferEphemeral: true),
+      if (!context.mounted) return;
+      final result = await showNetSuiteAuthWebView(
+        context,
+        authorizeUrl,
+        callbackUrlScheme,
       );
+
+      if (result == null) return; // User cancelled the WebView
+
+      loading = true;
+      notifyListeners();
 
       debugPrint('[AUTH] Callback result: $result');
       final uri = Uri.parse(result);
@@ -427,8 +434,69 @@ class AppState extends ChangeNotifier {
         msg.contains('expired') || msg.contains('token');
   }
 
-  /// Clears auth state so the router redirects to the login page.
-  Future<void> expireSession() async {
+  /// Shows a re-auth WebView overlay without clearing app state.
+  /// Called when an API request returns a 401/403 during active use.
+  void triggerReAuth() {
+    if (needsReAuth) return;
+    needsReAuth = true;
+    error = 'Session expired. Please sign in again.';
+    notifyListeners();
+  }
+
+  /// Called by the re-auth overlay after the user successfully re-authenticates.
+  /// Updates the token in memory and DB without disturbing any other state.
+  Future<void> completeReAuth({
+    required NetSuiteAuthConfig cfg,
+    required String callbackUrl,
+    required String expectedState,
+  }) async {
+    try {
+      final uri = Uri.parse(callbackUrl);
+      String? code = uri.queryParameters['code'];
+      String? returnedState = uri.queryParameters['state'];
+      if (uri.fragment.isNotEmpty) {
+        final frag = Uri.splitQueryString(uri.fragment);
+        code ??= frag['code'];
+        returnedState ??= frag['state'];
+      }
+      if (returnedState != expectedState) {
+        throw Exception('OAuth state mismatch during re-authentication.');
+      }
+      if (code == null || code.isEmpty) {
+        throw Exception('No authorization code returned during re-authentication.');
+      }
+      final exchanged = await api.exchangeCodeForToken(
+        cfg: cfg,
+        code: code,
+        accountId: accountId,
+      );
+      token = exchanged.token;
+      if (accountId == null || accountId!.isEmpty) {
+        accountId = exchanged.accountId.isNotEmpty
+            ? exchanged.accountId
+            : _extractAccountFromJwt(token!);
+      }
+      await db.saveAuth(token!, accountId!);
+      needsReAuth = false;
+      error = null;
+    } catch (e) {
+      debugPrint('[REAUTH] completeReAuth failed: $e');
+      // Fall back to full session clear so the user is sent to the login page.
+      await _clearSession();
+      return;
+    }
+    notifyListeners();
+  }
+
+  /// Called when the user cancels the re-auth WebView — clears everything and
+  /// sends the router back to the login page.
+  Future<void> cancelReAuth() async {
+    needsReAuth = false;
+    await _clearSession();
+  }
+
+  /// Clears all auth and app state. The router will redirect to [AuthPage].
+  Future<void> _clearSession() async {
     await db.clearAuth();
     token = null;
     accountId = null;
@@ -444,9 +512,14 @@ class AppState extends ChangeNotifier {
     currentUserName = null;
     currentRoleName = null;
     currentUserEmail = null;
+    needsReAuth = false;
     error = 'Session expired. Please sign in again.';
     notifyListeners();
   }
+
+  /// Kept for backwards compatibility. Prefer [triggerReAuth] when a token
+  /// expires during active use so the user can re-authenticate in place.
+  Future<void> expireSession() async => _clearSession();
 
   // ── Location ──────────────────────────────────────────────────────────────
 
@@ -477,7 +550,7 @@ class AppState extends ChangeNotifier {
         );
       } catch (e) {
         if (isAuthError(e)) {
-          await expireSession();
+          triggerReAuth();
           throw Exception('Session expired. Please sign in again.');
         }
         rethrow;
@@ -930,7 +1003,7 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         debugPrint('[SUBMIT] on-hand fetch error: $e');
         if (isAuthError(e)) {
-          await expireSession();
+          triggerReAuth();
           throw Exception('Session expired. Please sign in again.');
         }
         rethrow;
@@ -1000,7 +1073,7 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         debugPrint('[SUBMIT] createInventoryAdjustment error: $e');
         if (isAuthError(e)) {
-          await expireSession();
+          triggerReAuth();
           throw Exception('Session expired. Please sign in again.');
         }
         // NetSuite returns this when a lot/serial item is submitted without

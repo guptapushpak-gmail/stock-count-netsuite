@@ -31,7 +31,7 @@ class AuthPage extends StatelessWidget {
                     child: FilledButton(
                       onPressed: app.loading
                           ? null
-                          : () => context.read<AppState>().loginWithNetSuite(),
+                          : () => context.read<AppState>().loginWithNetSuite(context),
                       child: app.loading
                           ? const SizedBox(
                               height: 18,
@@ -86,28 +86,13 @@ class _NetStoreProNextLogo extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         // Wordmark
-        RichText(
-          text: TextSpan(
-            children: [
-              TextSpan(
-                text: 'NetStore',
-                style: TextStyle(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w800,
-                  color: colorScheme.onSurface,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              TextSpan(
-                text: ' Pro',
-                style: TextStyle(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w300,
-                  color: colorScheme.primary,
-                  letterSpacing: -0.5,
-                ),
-              ),
-            ],
+        Text(
+          'NetStore',
+          style: TextStyle(
+            fontSize: 34,
+            fontWeight: FontWeight.w800,
+            color: colorScheme.onSurface,
+            letterSpacing: -0.5,
           ),
         ),
         const SizedBox(height: 4),

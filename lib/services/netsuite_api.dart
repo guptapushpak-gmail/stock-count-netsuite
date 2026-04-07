@@ -186,7 +186,12 @@ class NetSuiteApi {
           '/services/rest/query/v1/suiteql',
           queryParameters: {'limit': limit, 'offset': offset},
           data: {
-            'q': "SELECT id, itemid, displayname, upccode, islotitem, isserialitem FROM InventoryItem WHERE isinactive = 'F' ORDER BY id",
+            'q': "SELECT id, itemid, displayname, upccode, 'F' as islotitem, 'F' as isserialitem FROM InventoryItem WHERE isinactive = 'F' "
+                "UNION ALL "
+                "SELECT id, itemid, displayname, upccode, 'T' as islotitem, 'F' as isserialitem FROM LotNumberedInventoryItem WHERE isinactive = 'F' "
+                "UNION ALL "
+                "SELECT id, itemid, displayname, upccode, 'F' as islotitem, 'T' as isserialitem FROM SerializedInventoryItem WHERE isinactive = 'F' "
+                "ORDER BY id",
           },
           options: Options(headers: {
             'Authorization': 'Bearer $token',
@@ -199,9 +204,6 @@ class NetSuiteApi {
         for (final e in items.whereType<Map<String, dynamic>>()) {
           final id = (e['id'] ?? '').toString().trim();
           if (id.isEmpty) continue;
-          // Skip lot-numbered and serialized items — they require inventory
-          // detail (lot/serial numbers) which inventory adjustments via REST
-          // cannot provide without additional complexity.
           final isLot = (e['islotitem'] ?? 'F').toString().toUpperCase() == 'T';
           final isSerial = (e['isserialitem'] ?? 'F').toString().toUpperCase() == 'T';
           final name = ((e['displayname'] ?? e['itemid'] ?? '').toString()).trim();
@@ -468,7 +470,11 @@ class NetSuiteApi {
         '/services/rest/query/v1/suiteql',
         queryParameters: {'limit': limit, 'offset': offset},
         data: {
-          'q': 'SELECT id, islotitem, isserialitem FROM InventoryItem WHERE id IN ($itemIds)',
+          'q': "SELECT id, 'F' as islotitem, 'F' as isserialitem FROM InventoryItem WHERE id IN ($itemIds) "
+              "UNION ALL "
+              "SELECT id, 'T' as islotitem, 'F' as isserialitem FROM LotNumberedInventoryItem WHERE id IN ($itemIds) "
+              "UNION ALL "
+              "SELECT id, 'F' as islotitem, 'T' as isserialitem FROM SerializedInventoryItem WHERE id IN ($itemIds)",
         },
         options: Options(headers: {
           'Authorization': 'Bearer $token',

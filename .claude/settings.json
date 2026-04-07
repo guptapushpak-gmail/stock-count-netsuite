@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter pub:*)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(jobs -l)",
+      "Bash(pkill -f \"flutter_tools\")"
+    ],
+    "additionalDirectories": [
+      "/dev"
+    ]
+  }
+}
